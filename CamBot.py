@@ -24,34 +24,36 @@ def serverPop():
                 return pop.text
 
             else:
-                return 'Connection to Battlemetrics failed'
+                return 'Server not found'
 
 
     except RequestException as e:
-        return 'Error during requests to {0} : {1}'.format('https://www.battlemetrics.com/servers/rust/2634280', str(e))
+        return 'Connection to Battlemetrics failed'
 
-def craftCalc(item):
-    url = 'https://rustlabs.com/item/' + item + '#tab=craft'
-    itemalt = item.capitalize() + ' Blueprint'
-    print(itemalt)
+def craftCalc(item, numItem):
+    itemArr = item.split()
+    itemURL = "-".join(itemArr)
+    capitalized_parts = [i.capitalize() for i in itemArr]
+    itemalt = " ".join(capitalized_parts) + ' Blueprint'
+    url = 'https://rustlabs.com/item/' + itemURL + '#tab=craft'
     try:
         with closing(get(url, stream=True)) as resp:
             content_type = resp.headers['Content-Type'].lower()
             if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
                 html = BeautifulSoup(resp.content, 'html.parser')
                 items = html.find('img', alt = itemalt).parent.find_next_sibling('td').find_next_sibling('td').select('a')
-                tempstr = 'Crafting cost for **' + item + '**:\n'
+                tempstr = 'Crafting cost for **' + item.title() + '**:\n'
                 for component in items:
-                    tempstr += '\t' + component.text + ' ' + component.img['alt'] + '\n'
+                    tempstr += '\t' + component.img['alt'] + ' ' + component.text + '\n'
                 return(tempstr)
 
 
             else:
-                return 'Connection to Rustlabs failed'
+                return 'Item recipe not found'
 
 
     except RequestException as e:
-        return 'Error during requests to {0} : {1}'.format('https://www.battlemetrics.com/servers/rust/2634280', str(e))
+        return 'Connection to RustLabs failed'
 
 
 
@@ -80,8 +82,18 @@ async def on_message(message):
         await message.channel.send('Rustafied Trio currently has ' + P() + ' players online')
 
     elif message.content.lower().startswith('!craftcalc'):
-        cmd = message.content.lower().split()
-        await message.channel.send(craftCalc(cmd[1]))
+        first, _, rest = message.content.lower().partition(" ")
+        rest or first
+        try:
+            pnum = rest.rsplit(' ', 1)[1]
+            if(pnum.isnumeric()):
+                item = rest.rsplit(' ', 1)[0]
+                await message.channel.send(craftCalc(item, pnum))
+            else:
+                await message.channel.send(craftCalc(rest, 1))
+        except:
+            await message.channel.send(craftCalc(rest, 1))
+        #await message.channel.send(craftCalc(cmd[1]))
 
     #DONE
     elif message.content.lower().startswith('!status'):
@@ -92,4 +104,4 @@ async def on_message(message):
 
 
 
-client.run('Njg0MDU4MzU5Njg2ODg5NDgz.Xl0lOA.HCeeip20VPRilao_p4VRTA-JqFU')
+client.run('Njg0MDU4MzU5Njg2ODg5NDgz.XmJmdA.c2dE6my-hyZIVpPGkJlJjqqUInY')
