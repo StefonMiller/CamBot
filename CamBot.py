@@ -1,3 +1,4 @@
+import re
 import discord
 from requests import get
 from requests.exceptions import RequestException
@@ -31,25 +32,37 @@ def serverPop():
         return 'Connection to Battlemetrics failed'
 
 def craftCalc(item, numItem):
+    print(item)
     itemArr = item.split()
+    print(itemArr)
     itemURL = "-".join(itemArr)
-    capitalized_parts = [i.capitalize() for i in itemArr]
-    itemalt = " ".join(capitalized_parts) + ' Blueprint'
+    capitalized_parts = [i.title() for i in itemArr]
+    itemAlt = " ".join(capitalized_parts) + ' Blueprint'
+    print(itemURL)
+    print(itemAlt)
     url = 'https://rustlabs.com/item/' + itemURL + '#tab=craft'
     try:
         with closing(get(url, stream=True)) as resp:
             content_type = resp.headers['Content-Type'].lower()
             if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
                 html = BeautifulSoup(resp.content, 'html.parser')
-                items = html.find('img', alt = itemalt).parent.find_next_sibling('td').find_next_sibling('td').select('a')
+                #try:
+                items = html.find('img', alt = itemAlt).parent.find_next_sibling('td').find_next_sibling('td').select('a')
                 tempstr = 'Crafting cost for **' + item.title() + '**:\n'
                 for component in items:
-                    tempstr += '\t' + component.img['alt'] + ' ' + component.text + '\n'
+                    try:
+                        num = re.search(r'\d+', component.text).group()
+                    except Exception as e1:
+                        num = 1
+                    tempstr += '\t' + component.img['alt'] + ' x' + (str(int(num) * int(numItem))) + '\n'
                 return(tempstr)
+                #except Exception as e:
+                    #print(e)
+                    #return 'Item not found'
 
 
             else:
-                return 'Item recipe not found'
+                return 'Item not found'
 
 
     except RequestException as e:
@@ -77,23 +90,28 @@ async def on_message(message):
     if message.content.lower().startswith('!cambot help'):
         await message.channel.send(listCommands())
 
-    #TODO list recipes for requested items / sulfur amount
+    #DONE
     elif message.content.lower().startswith('!serverpop'):
         await message.channel.send('Rustafied Trio currently has ' + P() + ' players online')
 
+    #TODO Add aliases, fix all caps words, add multiplier for numCrafts
     elif message.content.lower().startswith('!craftcalc'):
         first, _, rest = message.content.lower().partition(" ")
         rest or first
         try:
             pnum = rest.rsplit(' ', 1)[1]
-            if(pnum.isnumeric()):
-                item = rest.rsplit(' ', 1)[0]
-                await message.channel.send(craftCalc(item, pnum))
-            else:
-                await message.channel.send(craftCalc(rest, 1))
-        except:
+        except IndexError as e:
+            print(e)
             await message.channel.send(craftCalc(rest, 1))
-        #await message.channel.send(craftCalc(cmd[1]))
+
+        if(pnum.isnumeric()):
+            item = rest.rsplit(' ', 1)[0]
+            print(pnum)
+            print(item)
+            await message.channel.send(craftCalc(item, pnum))
+        else:
+            await message.channel.send(craftCalc(rest, 1))
+
 
     #DONE
     elif message.content.lower().startswith('!status'):
@@ -104,4 +122,4 @@ async def on_message(message):
 
 
 
-client.run('Njg0MDU4MzU5Njg2ODg5NDgz.XmJmdA.c2dE6my-hyZIVpPGkJlJjqqUInY')
+client.run('Njg0MDU4MzU5Njg2ODg5NDgz.XmLxFA.FkiSiSH14Unaj6ZRE7usAcJvukc')
