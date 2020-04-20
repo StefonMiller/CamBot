@@ -55,21 +55,35 @@ def get_status():
     return p.status_code == 200
 
 
-def craft_calc(itemName, numCrafts):
+def craft_calc(item_name, num_crafts):
     cost = ""
     sql_select_query = """SELECT * FROM craft_recipe WHERE fk_item_name = %s"""
-    cursor.execute(sql_select_query, (itemName,))
+    cursor.execute(sql_select_query, (item_name,))
     record = cursor.fetchall()
     for row in record:
-        numcost = int(numCrafts) * row[3]
+        num_cost = int(num_crafts) * row[3]
         if row[1] is None:
-            cost = cost + ' **' + row[2] + '**:\t' + str(f"{numcost:,}") + '\n'
+            cost = cost + ' **' + row[2] + '**:\t' + str(f"{num_cost:,}") + '\n'
         elif row[2] is None:
-            cost = cost + ' **' + row[1] + '**\t' + str(f"{numcost:,}") + '\n'
+            cost = cost + ' **' + row[1] + '**\t' + str(f"{num_cost:,}") + '\n'
     if not record:
         return 'Item not found in database'
     else:
-        return 'Crafting cost for ' + str(numCrafts) + ' ' + itemName + ':\n' + cost
+        return 'Crafting cost for ' + str(num_crafts) + ' ' + item_name + ':\n' + cost
+
+
+def get_best_match(servers, search_name):
+    for i in servers:
+        name = i.find('a').get('title')
+        best = True
+        for j in search_name:
+            if j.lower() in name.lower():
+                pass
+            else:
+                best = False
+        if best:
+            return i
+    return ''
 
 
 def tweet(msg, pic):
@@ -124,18 +138,27 @@ async def on_message(message):
                     else:
                         serv_name = serv_name + " " + i.capitalize()
             url = 'https://battlemetrics.com/servers/rust?q=' + serv_name + '&sort=rank'
+            print(url)
             try:
                 with closing(get(url, stream=True)) as resp:
                     content_type = resp.headers['Content-Type'].lower()
                     if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
                         html = BeautifulSoup(resp.content, 'html.parser')
                         server_table = html.find('table', {"class": "css-1yjs8zt"})
-                        entries = server_table.find('tbody')
-                        first_match = entries.find('tr')
-                        link = first_match.find('a').get('href')
-                        serv_name = first_match.find('a').get('title')
-                        url = 'https://battlemetrics.com' + link
-                        await message.channel.send(serv_name + ' currently has ' + server_pop(url) + ' players online')
+                        entries = server_table.find('tbody').contents
+                        servers = []
+                        for i in entries:
+                            if i.find('a'):
+                                servers.append(i)
+                        best_match = get_best_match(servers, serv_name.split())
+                        if best_match == '':
+                            print('Server not found')
+                        else:
+                            link = best_match.find('a').get('href')
+                            serv_name = best_match.find('a').get('title')
+                            url = 'https://battlemetrics.com' + link
+                            await message.channel.send(
+                                serv_name + ' currently has ' + server_pop(url) + ' players online')
                     else:
                         print('Server not found')
 
@@ -171,7 +194,7 @@ async def on_message(message):
                 await message.channel.send(craft_calc(craftname, 1))
 
     elif message.content.lower().startswith('!tweet'):
-        msg = '@yvngalec @AidanT5 MMM SHOOT PEEPLE WIN GAME ME WILL BE ON CHATURBATE'
+        msg = '@yvngalec @AidanT5 TEST TWEET YES'
         pic = 'C:/Users/Stefon/PycharmProjects/CamBot/delete.jpg'
         tweet(msg, pic)
         await message.channel.send('New tweet created at ' + datetime.now().strftime("%m-%d-%Y %H:%M:%S") + ' EST')
