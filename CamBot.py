@@ -1,7 +1,5 @@
 import re
-import time
 import urllib
-
 import discord
 from requests import get
 from requests.exceptions import RequestException
@@ -10,9 +8,6 @@ from bs4 import BeautifulSoup
 import mysql.connector
 import tweepy
 from datetime import datetime
-import xml.etree.ElementTree as ET
-import csv
-import requests
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -38,7 +33,10 @@ def list_commands():
             '\t**!craftcalc** outputs the recipe of a certain item\n'
             '\t**!status** gives you the current status of Cambot\'s dependent servers\n'
             '\t**!serverpop** gives the current pop for our frequented servers. Use !serverpop [servername] to get '
-            'information about another server\n')
+            'information about another server\n'
+            '\t**!devblog** posts a link to the newest devblog with a short summary\n'
+            '\t**!rustnews** posts a link to the latest news on the new Rust update\n'
+            '\t**!rustitems** displays all items on the rust store along with prices\n')
 
 
 # Returns the player count of a certain server URL on Battlemetrics.com
@@ -158,20 +156,30 @@ def get_devblog(url, kw1, kw2):
         xml = BeautifulSoup(u, 'xml')
         titles = xml.find_all('title')
         for title in titles:
+            # Find the first title that has kw1 but not kw2, in the case of devblogs, we are looking for
+            # titles that contain 'update' but not 'community'. This provides all monthly updates that are not
+            # community updates
             if title.find(text=re.compile(kw1)) and not title.find(text=re.compile(kw2)):
+                # Once we find the newest update, get the link to the devblog and its description
                 link = title.find_next_sibling('a10:link')
                 desc = title.find_next_sibling('description')
+                # For some reason the rss feed bundles an image source with the description, so we take all text
+                # after the br tag as our description
                 description = desc.text.split("<br/>", 1)[1]
                 return str(title.text), link['href'], description
+        # If we don't find a matching title, return a no devblog result
         return 'No Devblog found'
 
 
+# Returns a title and description of the newest update article on rustafied.com
+# @Param url: The url of rustafied's website
+# @Return: The title and description of the article at url
 def get_news(url):
     try:
         # Try to connect to the server
         with closing(get(url, stream=True)) as resp:
             content_type = resp.headers['Content-Type'].lower()
-            # If we are able to connect, find the dt containing the player cound and return the text
+            # If we are able to connect, get the title of the news article and its short description
             if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
                 html = BeautifulSoup(resp.content, 'html.parser')
                 title_element = html.find('h1', {"class": "entry-title"})
@@ -182,6 +190,39 @@ def get_news(url):
 
     except RequestException:
         return 'Connection to Rustafied failed'
+
+
+# Returns all item entries on rust's steam store page and their total price
+# @Param url: URL of the rust item store
+# @Return: A collection of all items and the total price of said items
+def get_rust_items(url):
+    try:
+        # Try to connect to the server
+        with closing(get(url, stream=True)) as resp:
+            content_type = resp.headers['Content-Type'].lower()
+            # If we are able to connect, get the name and price of each item
+            if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
+                html = BeautifulSoup(resp.content, 'html.parser')
+                item_divs = html.find_all('div', {"class": "item_def_grid_item"})
+                item_dict = {}
+                total_price = 0
+                for i in item_divs:
+                    #Get div containing item name and store its text attribute
+                    item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
+                    item_name = item_name_div.text
+                    #Get div containing item price and store its text attribute
+                    item_price_div = i.find('div', {"class": "item_def_price"})
+                    #Convert the price to a double for addition and store it in the total price var
+                    item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
+                    item_price_in_double = float(item_price[1:])
+                    total_price += item_price_in_double
+                    item_dict[item_name] = item_price
+                return item_dict, total_price
+            else:
+                return 'Rust store page not found'
+
+    except RequestException:
+        return 'Connection to Steam failed'
 
 
 @client.event
@@ -257,8 +298,12 @@ async def on_message(message):
             except RequestException as e:
                 print('Connection to Battlemetrics failed' + e)
 
+    # Print out the latest news regarding Rust's future update
+    # This will be used to return news whenever the website updates
     elif message.content.lower().startswith('!rustnews'):
+        # Navigate to Rustafied.com and get the title and description of the new article
         title, desc = get_news('https://rustafied.com')
+        # Embed a link to the site with the retrieved title and description
         embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
         await message.channel.send('This will be used in the future to make a discord post whenever Rustafied updates '
                                    'with news', embed=embed)
@@ -269,6 +314,26 @@ async def on_message(message):
         title, url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
         embed = discord.Embed(title=title, url=url, description=desc)
         await message.channel.send('Newest Rust Devblog:', embed=embed)
+
+    # Displays the current list of rust items for sale, along with their prices
+    elif message.content.lower().startswith('!rustitems'):
+        url = 'https://store.steampowered.com/itemstore/252490/browse/?filter=All'
+        items, total_item_price = get_rust_items(url)
+        total_item_price = '$' + str("{:.2f}".format(total_item_price))
+        # If the dictionary is empty, then the item store is having an error or is updating
+        if not bool(items):
+            await message.channel.send('Rust item store is not hot!!!')
+        # If we have entries, format and display them
+        else:
+            item_list = ''
+            col_width = max(len(item) for item in items) + 6
+            # Format the strings for display, this is about the best it gets at the moment as discord does
+            # not provide text formatting. So the string looks perfect in console but is off in the chat message
+            for item in items:
+                item_text = '**' + item + '**'
+                item_list += item_text.ljust(col_width) + items[item].ljust(col_width) + '\n'
+            item_list += '**Total Price:** '.ljust(col_width) + total_item_price.ljust(col_width)
+            await message.channel.send('Item store: ' + url + '\n\n' + item_list)
 
 
     # Gets the recipe for a certain item
