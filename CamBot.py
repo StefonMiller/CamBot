@@ -40,24 +40,12 @@ def list_commands():
 
 
 # Returns the player count of a certain server URL on Battlemetrics.com
-# @Param url: - url of the server we want the player count of
+# @Param serv_url: - url of the server we want the player count of
 # @Return: - number of players on the server
-def server_pop(url):
-    try:
-        # Try to connect to the server
-        with closing(get(url, stream=True)) as resp:
-            content_type = resp.headers['Content-Type'].lower()
-            # If we are able to connect, find the dt containing the player cound and return the text
-            if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
-                html = BeautifulSoup(resp.content, 'html.parser')
-                pop = html.find('dt', string='Player count').find_next_sibling('dd')
-                return pop.text
-
-            else:
-                return 'Server not found'
-
-    except RequestException:
-        return 'Connection to Battlemetrics failed'
+def server_pop(serv_url):
+    serv_html = get_html(serv_url)
+    pop = serv_html.find('dt', string='Player count').find_next_sibling('dd')
+    return pop.text
 
 
 # Gets the status of all servers the CamBot is dependent on
@@ -77,23 +65,55 @@ def get_status():
 # @Param item_name: name of the item to get from the database
 # @Param num_crafts: number of times to craft said item
 # @Return: Total crafting cost for the requested item * num_crafts
-def craft_calc(item_name, num_crafts):
-    # Select the recipe from the database with the corresponding item name
-    cost = ""
-    sql_select_query = """SELECT * FROM craft_recipe WHERE fk_item_name = %s"""
-    cursor.execute(sql_select_query, (item_name,))
-    record = cursor.fetchall()
-    # Multiply the number of crafts times the cost in the database for each recipe entry
-    for row in record:
-        num_cost = int(num_crafts) * row[3]
-        if row[1] is None:
-            cost = cost + ' **' + row[2] + '**:\t' + str(f"{num_cost:,}") + '\n'
-        elif row[2] is None:
-            cost = cost + ' **' + row[1] + '**\t' + str(f"{num_cost:,}") + '\n'
-    if not record:
-        return 'Item not found in database'
+def craft_calc(search_terms, num_crafts):
+    print(search_terms)
+    item_url = 'https://rustlabs.com/group=itemlist'
+    item_html = get_html(item_url)
+    # Find all items matching at least one of the search terms. I couldn't find an accurate match on multiple
+    # terms with re.compile in the find method, so this will at least narrow down the initial search results
+    # enough to make the n^2 function call of get_best_match not as impactful as calling it on the full item
+    # list. In the future I will look into finding a more elegant solution to this
+    item_list = item_html.find_all('span', {"class": "r-cell"},
+                                   text=(re.compile(term, re.IGNORECASE) for term in search_terms))
+    item = get_best_item_match(item_list, search_terms)
+    if item is None:
+        print('Item not found')
     else:
-        return 'Crafting cost for ' + str(num_crafts) + ' ' + item_name + ':\n' + cost
+        item_link = item.parent['href']
+        # Once we find the appropriate item, open its corresponding page and get the crafting data
+        total_link = 'https://rustlabs.com' + item_link + '#tab=craft'
+        craft_html = get_html(total_link)
+        # Get the tr in which the recipe is stored
+        recipe = craft_html.find('td', {"class": "item-cell"}).parent
+        # Get the first td in the tr with a class title 'no-padding'
+        ingredient_td = recipe.find('td', {"class": "no-padding"})
+        # Find all ingredients in the first row we found
+        ingredients = ingredient_td.find_all('a', {"class": "item-box"})
+        # Get the ingredient name and quantity out of each ingredient and put them in a list
+        craft_string = ''
+        for ingredient in ingredients:
+            craft_string += str(ingredient.find('img')['alt'] + '\t\t')
+            if ingredient.text == '':
+                craft_string += 'x1\n'
+            else:
+                craft_string += str(ingredient.text) + '\n'
+
+        return craft_string
+
+
+def get_best_item_match(i_list, terms):
+    for i in i_list:
+        best = True
+        i_text = i.text.lower()
+        for term in terms:
+            if term in i_text:
+                pass
+            else:
+                best = False
+        if best:
+            return i
+
+    return None
 
 
 # Returns the first server that contains each search term. Since the servers are already sorted by rank, this will
@@ -101,7 +121,7 @@ def craft_calc(item_name, num_crafts):
 # @Param servers: List of servers
 # @Param search_name: List of search terms
 # @Return: First server from the servers list that matches each item in search_name
-def get_best_match(servers, search_name):
+def get_best_server_match(servers, search_name):
     # Iterate through each server and test if they contain each search term
     for i in servers:
         name = i.find('a').get('title')
@@ -151,8 +171,8 @@ def tweet(msg, pic):
 # @Param kw1: First keyword to scrape based on
 # @Param kw2: Second keyword to scrape based on
 # @Return: The update name, link, and description
-def get_devblog(url, kw1, kw2):
-    with urllib.request.urlopen(url) as u:
+def get_devblog(db_url, kw1, kw2):
+    with urllib.request.urlopen(db_url) as u:
         xml = BeautifulSoup(u, 'xml')
         titles = xml.find_all('title')
         for title in titles:
@@ -174,55 +194,44 @@ def get_devblog(url, kw1, kw2):
 # Returns a title and description of the newest update article on rustafied.com
 # @Param url: The url of rustafied's website
 # @Return: The title and description of the article at url
-def get_news(url):
-    try:
-        # Try to connect to the server
-        with closing(get(url, stream=True)) as resp:
-            content_type = resp.headers['Content-Type'].lower()
-            # If we are able to connect, get the title of the news article and its short description
-            if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
-                html = BeautifulSoup(resp.content, 'html.parser')
-                title_element = html.find('h1', {"class": "entry-title"})
-                desc_element = html.find('p', {"style": "white-space:pre-wrap;"})
-                return title_element.text, desc_element.text
-            else:
-                return 'Rustafied update page not found'
-
-    except RequestException:
-        return 'Connection to Rustafied failed'
+def get_news(news_url):
+    news_html = get_html(news_url)
+    title_element = news_html.find('h1', {"class": "entry-title"})
+    desc_element = news_html.find('p', {"style": "white-space:pre-wrap;"})
+    return title_element.text, desc_element.text
 
 
 # Returns all item entries on rust's steam store page and their total price
 # @Param url: URL of the rust item store
 # @Return: A collection of all items and the total price of said items
-def get_rust_items(url):
-    try:
-        # Try to connect to the server
-        with closing(get(url, stream=True)) as resp:
-            content_type = resp.headers['Content-Type'].lower()
-            # If we are able to connect, get the name and price of each item
-            if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
-                html = BeautifulSoup(resp.content, 'html.parser')
-                item_divs = html.find_all('div', {"class": "item_def_grid_item"})
-                item_dict = {}
-                total_price = 0
-                for i in item_divs:
-                    #Get div containing item name and store its text attribute
-                    item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
-                    item_name = item_name_div.text
-                    #Get div containing item price and store its text attribute
-                    item_price_div = i.find('div', {"class": "item_def_price"})
-                    #Convert the price to a double for addition and store it in the total price var
-                    item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
-                    item_price_in_double = float(item_price[1:])
-                    total_price += item_price_in_double
-                    item_dict[item_name] = item_price
-                return item_dict, total_price
-            else:
-                return 'Rust store page not found'
+def get_rust_items(item_url):
+    item_html = get_html(item_url)
+    item_divs = item_html.find_all('div', {"class": "item_def_grid_item"})
+    item_dict = {}
+    total_price = 0
+    for i in item_divs:
+        # Get div containing item name and store its text attribute
+        item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
+        item_name = item_name_div.text
+        # Get div containing item price and store its text attribute
+        item_price_div = i.find('div', {"class": "item_def_price"})
+        # Convert the price to a double for addition and store it in the total price var
+        item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
+        item_price_in_double = float(item_price[1:])
+        total_price += item_price_in_double
+        item_dict[item_name] = item_price
+    return item_dict, total_price
 
-    except RequestException:
-        return 'Connection to Steam failed'
+
+# Gets a BeautifulSoup html object from a given url, and prints out an error if there was an error connecting
+def get_html(url):
+    with closing(get(url, stream=True)) as resp:
+        content_type = resp.headers['Content-Type'].lower()
+        if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
+            html = BeautifulSoup(resp.content, 'html.parser')
+            return html
+        else:
+            return ''
 
 
 @client.event
@@ -264,39 +273,31 @@ async def on_message(message):
                     else:
                         serv_name = serv_name + " " + i.capitalize()
             # Navigate to the specific server search requested
-            url = 'https://battlemetrics.com/servers/rust?q=' + serv_name + '&sort=rank'
-            try:
-                with closing(get(url, stream=True)) as resp:
-                    content_type = resp.headers['Content-Type'].lower()
-                    if resp.status_code == 200 and content_type is not None and content_type.find('html') > -1:
-                        html = BeautifulSoup(resp.content, 'html.parser')
-                        # Find the table containing the search results
-                        server_table = html.find('table', {"class": "css-1yjs8zt"})
-                        # Get all children of the table
-                        entries = server_table.find('tbody').contents
-                        servers = []
-                        # Omit any results not containing a link
-                        # This mitigates the style child of the tbody
-                        for i in entries:
-                            if i.find('a'):
-                                servers.append(i)
-                        # Find the best match given the new list of servers and all search terms
-                        best_match = get_best_match(servers, serv_name.split())
-                        # If get_best_match returns an empty string, there was no matching server
-                        if best_match == '':
-                            print('Server not found')
-                        # If we did find a server, get the link from the html element and get its pop via server_pop
-                        else:
-                            link = best_match.find('a').get('href')
-                            serv_name = best_match.find('a').get('title')
-                            url = 'https://battlemetrics.com' + link
-                            await message.channel.send(
-                                serv_name + ' currently has ' + server_pop(url) + ' players online')
-                    else:
-                        print('Server not found')
+            bm_url = 'https://battlemetrics.com/servers/rust?q=' + serv_name + '&sort=rank'
+            bm_html = get_html(bm_url)
+            # Find the table containing the search results
+            server_table = bm_html.find('table', {"class": "css-1yjs8zt"})
+            # Get all children of the table
+            entries = server_table.find('tbody').contents
+            servers = []
+            # Omit any results not containing a link
+            # This mitigates the style child of the tbody
+            for i in entries:
+                if i.find('a'):
+                    servers.append(i)
+            # Find the best match given the new list of servers and all search terms
+            best_match = get_best_server_match(servers, serv_name.split())
+            # If get_best_match returns an empty string, there was no matching server
+            if best_match == '':
+                print('Server not found')
+            # If we did find a server, get the link from the html element and get its pop via server_pop
+            else:
+                link = best_match.find('a').get('href')
+                serv_name = best_match.find('a').get('title')
+                url = 'https://battlemetrics.com' + link
+                await message.channel.send(
+                    serv_name + ' currently has ' + server_pop(url) + ' players online')
 
-            except RequestException as e:
-                print('Connection to Battlemetrics failed' + e)
 
     # Print out the latest news regarding Rust's future update
     # This will be used to return news whenever the website updates
@@ -311,14 +312,14 @@ async def on_message(message):
     # Outputs a link to of the newest rust devblog. I am using an xml parser to scrape the rss feed as the
     # website was JS rendered and I could not get selerium/pyqt/anything to return all of the html that I needed
     elif message.content.lower().startswith('!devblog'):
-        title, url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
-        embed = discord.Embed(title=title, url=url, description=desc)
+        title, devblog_url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
+        embed = discord.Embed(title=title, url=devblog_url, description=desc)
         await message.channel.send('Newest Rust Devblog:', embed=embed)
 
     # Displays the current list of rust items for sale, along with their prices
     elif message.content.lower().startswith('!rustitems'):
-        url = 'https://store.steampowered.com/itemstore/252490/browse/?filter=All'
-        items, total_item_price = get_rust_items(url)
+        store_url = 'https://store.steampowered.com/itemstore/252490/browse/?filter=All'
+        items, total_item_price = get_rust_items(store_url)
         total_item_price = '$' + str("{:.2f}".format(total_item_price))
         # If the dictionary is empty, then the item store is having an error or is updating
         if not bool(items):
@@ -333,12 +334,13 @@ async def on_message(message):
                 item_text = '**' + item + '**'
                 item_list += item_text.ljust(col_width) + items[item].ljust(col_width) + '\n'
             item_list += '**Total Price:** '.ljust(col_width) + total_item_price.ljust(col_width)
-            await message.channel.send('Item store: ' + url + '\n\n' + item_list)
+            await message.channel.send('Item store: ' + store_url + '\n\n' + item_list)
 
 
     # Gets the recipe for a certain item
+    # TODO Output item name along with recipe, allow for multiple craft quantitites
     elif message.content.lower().startswith('!craftcalc'):
-        craft_name = ""
+        craft_name = []
         args = message.content.lower().split()
         # If len(args) is 1, the user didn't enter an item name
         if len(args) == 1:
@@ -349,12 +351,7 @@ async def on_message(message):
                 if i == args[0] or i == args[-1]:
                     pass
                 else:
-                    # Re-integrate the list of words into a single string for the item name
-                    # Add a space between each word, but if the string is empty just add the word
-                    if craft_name == "":
-                        craft_name = i.capitalize()
-                    else:
-                        craft_name = craft_name + " " + i.capitalize()
+                    craft_name.append(i)
             # Try to convert the last word in the command to an int to test if the user entered an amount
             try:
                 # If the user entered an amount, check if it is a valid amount
@@ -368,10 +365,8 @@ async def on_message(message):
             # If the user didn't enter an amount, add the last word to the item name and call craft_calc with 1 as
             # the amount
             except Exception as e:
-                if craft_name == "":
-                    craft_name = i.capitalize()
-                else:
-                    craft_name = craft_name + " " + i.capitalize()
+                if not craft_name:
+                    craft_name.append(i)
                 await message.channel.send(craft_calc(craft_name, 1))
 
     # Tweet a message using tweepy
