@@ -1,4 +1,5 @@
 import re
+import string
 import urllib
 import discord
 from requests import get
@@ -66,7 +67,6 @@ def get_status():
 # @Param num_crafts: number of times to craft said item
 # @Return: Total crafting cost for the requested item * num_crafts
 def craft_calc(search_terms, num_crafts):
-    print(search_terms)
     item_url = 'https://rustlabs.com/group=itemlist'
     item_html = get_html(item_url)
     # Find all items matching at least one of the search terms. I couldn't find an accurate match on multiple
@@ -77,7 +77,7 @@ def craft_calc(search_terms, num_crafts):
                                    text=(re.compile(term, re.IGNORECASE) for term in search_terms))
     item = get_best_item_match(item_list, search_terms)
     if item is None:
-        print('Item not found')
+        return 'Item not found'
     else:
         item_link = item.parent['href']
         # Once we find the appropriate item, open its corresponding page and get the crafting data
@@ -87,18 +87,26 @@ def craft_calc(search_terms, num_crafts):
         recipe = craft_html.find('td', {"class": "item-cell"}).parent
         # Get the first td in the tr with a class title 'no-padding'
         ingredient_td = recipe.find('td', {"class": "no-padding"})
-        # Find all ingredients in the first row we found
-        ingredients = ingredient_td.find_all('a', {"class": "item-box"})
-        # Get the ingredient name and quantity out of each ingredient and put them in a list
-        craft_string = ''
-        for ingredient in ingredients:
-            craft_string += str(ingredient.find('img')['alt'] + '\t\t')
-            if ingredient.text == '':
-                craft_string += 'x1\n'
-            else:
-                craft_string += str(ingredient.text) + '\n'
+        if ingredient_td is None:
+            return 'Recipe not found'
+        else:
+            # Find all ingredients in the first row we found
+            ingredients = ingredient_td.find_all('a', {"class": "item-box"})
+            # Get the ingredient name and quantity out of each ingredient and put them in a list
+            craft_name = craft_html.find('h1').text
+            craft_string = 'Recipe for ' + str(num_crafts) + ' **' + craft_name + '**:\n'
+            for ingredient in ingredients:
+                # Get quantity of materials, default to 1(if no text), if there is text strip the 'x' or 'ft' from the
+                # text and convert it to an int so we can multiply by num_crafts
+                quantity = 1
+                if ingredient.text == '':
+                    pass
+                else:
+                    quantity = int(''.join(filter(str.isdigit, ingredient.text)))
+                total = quantity * num_crafts
+                craft_string += '\t' + str(total) + ' ' + str(ingredient.find('img')['alt']) + '\n'
 
-        return craft_string
+            return craft_string
 
 
 def get_best_item_match(i_list, terms):
@@ -338,7 +346,6 @@ async def on_message(message):
 
 
     # Gets the recipe for a certain item
-    # TODO Output item name along with recipe, allow for multiple craft quantitites
     elif message.content.lower().startswith('!craftcalc'):
         craft_name = []
         args = message.content.lower().split()
@@ -357,7 +364,7 @@ async def on_message(message):
                 # If the user entered an amount, check if it is a valid amount
                 args[-1] = int(args[-1])
                 if args[-1] <= 0:
-                    print('Please enter a valid number')
+                    await message.channel.send('Please enter a valid number')
                 else:
                     # If the user entered a valid amount, call craft_calc with the amount
                     craftnum = args[-1]
