@@ -1,31 +1,19 @@
 import re
-import string
 import urllib
 import discord
 from requests import get
 from requests.exceptions import RequestException
 from contextlib import closing
 from bs4 import BeautifulSoup
-import mysql.connector
 import tweepy
 from datetime import datetime
+from fuzzywuzzy import fuzz
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
     keys = f.read().splitlines()
-# Get SQL connection info from serverinfo text file
-with open('C:/Users/Stefon/PycharmProjects/CamBot/serverinfo.txt') as f:
-    server_info = f.read().splitlines()
 # Create client object for discord integration
 client = discord.Client()
-# Attempt connection to SQL server and create the cursor object for executing queries
-try:
-    c = mysql.connector.connect(host=server_info[0], database=server_info[1],
-                                user=server_info[2], password=server_info[3])
-    cursor = c.cursor()
-    print('Connected to server')
-except mysql.connector.Error as e:
-    print('Failed to connect to server'.format(e))
 
 
 # List all working commands for the discord bot
@@ -54,11 +42,14 @@ def server_pop(serv_url):
 def get_status():
     # Attempt connection to each dependent server and if the status is not 200, return false
     import requests
-    servers = [requests.head('https://www.battlemetrics.com/'), requests.head('https://rust.facepunch.com/blog/')]
+    servers = [requests.head('https://www.battlemetrics.com/'), requests.head('https://rust.facepunch.com/blog/')
+        , requests.head('https://www.rustlabs.com/'), requests.head('https://rustafied.com/')]
 
     for server in servers:
-        if server.status_code != 200:
-            return 'Servs r NOT hot!!!'
+        if server.status_code == 200 or 301:
+            pass
+        else:
+            return 'Serv ' + server.url + ' is NOT hot, status code alpha bravo ' + str(server.status_code) + '!!!'
     return 'All servs r hot n ready like little C\'s'
 
 
@@ -66,16 +57,15 @@ def get_status():
 # @Param item_name: name of the item to get from the database
 # @Param num_crafts: number of times to craft said item
 # @Return: Total crafting cost for the requested item * num_crafts
-def craft_calc(search_terms, num_crafts):
+def craft_calc(search_term, num_crafts):
     item_url = 'https://rustlabs.com/group=itemlist'
     item_html = get_html(item_url)
-    # Find all items matching at least one of the search terms. I couldn't find an accurate match on multiple
-    # terms with re.compile in the find method, so this will at least narrow down the initial search results
-    # enough to make the n^2 function call of get_best_match not as impactful as calling it on the full item
-    # list. In the future I will look into finding a more elegant solution to this
-    item_list = item_html.find_all('span', {"class": "r-cell"},
-                                   text=(re.compile(term, re.IGNORECASE) for term in search_terms))
-    item = get_best_item_match(item_list, search_terms)
+    # Get all item entries and use fuzzywuzzy to find the best match according to our list of search terms.
+    # Originally I had implemented a system in which I used re.compile to get all items with at least 1 search term to
+    # Reduce the amount of items returned, and then processed the resulting set against all search terms. However,
+    # this led to a lot of bugs and was really bad in general. This solution is far better than my original
+    item_list = item_html.find_all('span', {"class": "r-cell"})
+    item = get_best_match(item_list, search_term, 1)
     if item is None:
         return 'Item not found'
     else:
@@ -84,15 +74,26 @@ def craft_calc(search_terms, num_crafts):
         total_link = 'https://rustlabs.com' + item_link + '#tab=craft'
         craft_html = get_html(total_link)
         # Get the tr in which the recipe is stored
-        recipe = craft_html.find('td', {"class": "item-cell"}).parent
+        try:
+            recipe = craft_html.find('td', {"class": "item-cell"}).parent
+        except Exception as e:
+            return 'This item has no recipe'
         # Get the first td in the tr with a class title 'no-padding'
         ingredient_td = recipe.find('td', {"class": "no-padding"})
         if ingredient_td is None:
-            return 'Recipe not found'
+            return 'This item has no recipe'
         else:
             # Find all ingredients in the first row we found
             ingredients = ingredient_td.find_all('a', {"class": "item-box"})
-            # Get the ingredient name and quantity out of each ingredient and put them in a list
+            # Get the ingredient name and quantity out of each ingredient and put them in a list. Additionally,
+            # we have to get the output of the recipe(ex: 1 gunpowder craft gives you 10 gunpowder) in order to
+            # make the numbers correct
+            output_img = craft_html.find('img', {"class": "blueprint40"})
+            output_number = output_img.find_next_sibling()
+            if output_number.text == '':
+                output_number = 1
+            else:
+                output_number = int(''.join(filter(str.isdigit, output_number.text)))
             craft_name = craft_html.find('h1').text
             craft_string = 'Recipe for ' + str(num_crafts) + ' **' + craft_name + '**:\n'
             for ingredient in ingredients:
@@ -103,47 +104,34 @@ def craft_calc(search_terms, num_crafts):
                     pass
                 else:
                     quantity = int(''.join(filter(str.isdigit, ingredient.text)))
-                total = quantity * num_crafts
+                total = int((quantity * num_crafts) / output_number)
                 craft_string += '\t' + str(total) + ' ' + str(ingredient.find('img')['alt']) + '\n'
 
             return craft_string
 
 
-def get_best_item_match(i_list, terms):
+# Returns the best item in i_list matching term. Used for craftcalc and serverpop commands
+# @Param i_list: list of items to compart term to
+# @Param term: search term entered
+# @Return: Best matching element in i_list
+def get_best_match(i_list, term, scorer):
+    # This could be done with fuzzywuzzy's process.extractOne module, but I could not get it to work with a different
+    # scorer than WRatio.
+    best_item_match = None
+    best_item_match_num = 0
     for i in i_list:
-        best = True
-        i_text = i.text.lower()
-        for term in terms:
-            if term in i_text:
-                pass
-            else:
-                best = False
-        if best:
-            return i
+        # Get the item with the best ratio using fuzzywuzzy, depending on the ratio scorer parameter
+        if scorer == 1:
+            temp_ratio = fuzz.token_sort_ratio(term, i.text)
+        elif scorer == 2:
+            temp_ratio = fuzz.token_set_ratio(term, i.text)
 
-    return None
-
-
-# Returns the first server that contains each search term. Since the servers are already sorted by rank, this will
-# return the best server that matches each search term
-# @Param servers: List of servers
-# @Param search_name: List of search terms
-# @Return: First server from the servers list that matches each item in search_name
-def get_best_server_match(servers, search_name):
-    # Iterate through each server and test if they contain each search term
-    for i in servers:
-        name = i.find('a').get('title')
-        best = True
-        # If one search term is not found in the server, it is not the best match
-        for j in search_name:
-            if j.lower() in name.lower():
-                pass
-            else:
-                best = False
-        # Return the first server matching each term, otherwise return an empty string
-        if best:
-            return i
-    return ''
+        if temp_ratio > best_item_match_num:
+            best_item_match = i
+            best_item_match_num = temp_ratio
+        else:
+            pass
+    return best_item_match
 
 
 # Tweets a dynamic tweet, depending on the specified image/text
@@ -242,6 +230,20 @@ def get_html(url):
             return ''
 
 
+def sulf_calc(sulfur):
+    rocket_sulf = 1400
+    explo_sulf = 25
+    satchel_sulf = 480
+    c4_sulf = 2200
+    sulf_string = 'With **' + str(sulfur) + '** sulfur, you can craft:\n' + '\t**' + str(sulfur // rocket_sulf) + \
+                  '** Rockets with **' + str(sulfur % rocket_sulf) + '** sulfur left over\n' + '\t**' + \
+                  str(sulfur // explo_sulf) + '** Explosive 5.56 with **' + str(sulfur % explo_sulf) + \
+                  '** sulfur left over\n' + '\t**' + str(sulfur // satchel_sulf) + '** Satchel Charges with **' \
+                  + str(sulfur % satchel_sulf) + '** sulfur left over\n' + '\t**' + str(sulfur // c4_sulf) + \
+                  '** C4 with **' + str(sulfur % c4_sulf) + '** sulfur left over'
+    return sulf_string
+
+
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
@@ -292,16 +294,16 @@ async def on_message(message):
             # This mitigates the style child of the tbody
             for i in entries:
                 if i.find('a'):
-                    servers.append(i)
+                    servers.append(i.find('a'))
             # Find the best match given the new list of servers and all search terms
-            best_match = get_best_server_match(servers, serv_name.split())
+            best_match = get_best_match(servers, serv_name, 2)
             # If get_best_match returns an empty string, there was no matching server
             if best_match == '':
-                print('Server not found')
+                await message.channel.send('Server not found')
             # If we did find a server, get the link from the html element and get its pop via server_pop
             else:
-                link = best_match.find('a').get('href')
-                serv_name = best_match.find('a').get('title')
+                link = best_match['href']
+                serv_name = best_match.text
                 url = 'https://battlemetrics.com' + link
                 await message.channel.send(
                     serv_name + ' currently has ' + server_pop(url) + ' players online')
@@ -324,6 +326,65 @@ async def on_message(message):
         embed = discord.Embed(title=title, url=devblog_url, description=desc)
         await message.channel.send('Newest Rust Devblog:', embed=embed)
 
+    # Ouputs the drop table of a certain loot source
+    elif message.content.lower().startswith('!droptable'):
+        args = message.content.lower().split()
+        if len(args) == 1:
+            embed = discord.Embed()
+            embed.add_field(name="APC Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Locked Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Outpost Scientist", value="\n\u200b", inline=True)
+            embed.add_field(name="Bandit Camp Guard", value="\n\u200b", inline=True)
+            embed.add_field(name="Medical Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Primitive Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Barrel", value="\n\u200b", inline=True)
+            embed.add_field(name="Military Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Ration Box", value="\n\u200b", inline=True)
+            embed.add_field(name="Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Military Tunnel Scientist", value="\n\u200b", inline=True)
+            embed.add_field(name="Roaming Scientist", value="\n\u200b", inline=True)
+            embed.add_field(name="Elite Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Mine Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Sunken Chest", value="\n\u200b", inline=True)
+            embed.add_field(name="Food Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Minecart", value="\n\u200b", inline=True)
+            embed.add_field(name="Sunken Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Heavy Scientist", value="\n\u200b", inline=True)
+            embed.add_field(name="Oil Barrel", value="\n\u200b", inline=True)
+            embed.add_field(name="Supply Drop", value="\n\u200b", inline=True)
+            embed.add_field(name="Helicopter Crate", value="\n\u200b", inline=True)
+            embed.add_field(name="Oil Rig Scientist", value="\n\u200b", inline=True)
+            embed.add_field(name="Tool Box", value="\n\u200b", inline=True)
+            await message.channel.send('This command will display all items dropped from any of the following loot'
+                                       ' sources along with their respective drop percentages:\n', embed=embed)
+
+    # Output all loot sources that give a certain item
+    elif message.content.lower().startswith('!lootfrom'):
+        pass
+
+    # Outputs how many explosives you can craft with x sulfur
+    elif message.content.lower().startswith('!sulfur'):
+        args = message.content.lower().split()
+        # If len(args) is 1, the user didn't enter an item name
+        if len(args) == 1:
+            await message.channel.send('To use !sulfur, enter the amount of sulfur you have. I will then spit oot'
+                                       ' how many of each explosive you can SAUCE')
+        elif len(args) > 2:
+            await message.channel.send('Too many arguments, please enter !suflur [sulfur amount]. If you have gunpower,'
+                                       ' simply multiply it by 2 to get the amount of sulfur')
+        else:
+            num_sulf = -1
+            try:
+                num_sulf = int(args[-1])
+            except Exception as e:
+                pass
+            # If the user entered an amount, check if it is a valid amount
+            if num_sulf <= 0:
+                await message.channel.send('Please enter a valid number')
+            else:
+                # If the user entered a valid amount, call craft_calc with the amount
+                await message.channel.send(sulf_calc(num_sulf))
+
     # Displays the current list of rust items for sale, along with their prices
     elif message.content.lower().startswith('!rustitems'):
         store_url = 'https://store.steampowered.com/itemstore/252490/browse/?filter=All'
@@ -334,15 +395,15 @@ async def on_message(message):
             await message.channel.send('Rust item store is not hot!!!')
         # If we have entries, format and display them
         else:
-            item_list = ''
-            col_width = max(len(item) for item in items) + 6
+            embed = discord.Embed()
             # Format the strings for display, this is about the best it gets at the moment as discord does
             # not provide text formatting. So the string looks perfect in console but is off in the chat message
             for item in items:
                 item_text = '**' + item + '**'
-                item_list += item_text.ljust(col_width) + items[item].ljust(col_width) + '\n'
-            item_list += '**Total Price:** '.ljust(col_width) + total_item_price.ljust(col_width)
-            await message.channel.send('Item store: ' + store_url + '\n\n' + item_list)
+                embed.add_field(name='**' + item_text + '**', value=items[item], inline=False)
+            embed.add_field(name = '**Total Price:** ', value=total_item_price, inline=False)
+            item_str = 'Item store: ' + store_url + '\n\n'
+            await message.channel.send(item_str, embed=embed)
 
 
     # Gets the recipe for a certain item
@@ -368,13 +429,13 @@ async def on_message(message):
                 else:
                     # If the user entered a valid amount, call craft_calc with the amount
                     craftnum = args[-1]
-                    await message.channel.send(craft_calc(craft_name, craftnum))
+                    await message.channel.send(craft_calc(' '.join(craft_name), craftnum))
             # If the user didn't enter an amount, add the last word to the item name and call craft_calc with 1 as
             # the amount
             except Exception as e:
                 if not craft_name:
                     craft_name.append(i)
-                await message.channel.send(craft_calc(craft_name, 1))
+                await message.channel.send(craft_calc(' '.join(craft_name), 1))
 
     # Tweet a message using tweepy
     elif message.content.lower().startswith('!tweet'):
@@ -385,6 +446,9 @@ async def on_message(message):
     # Get status of all servers the bot depends on with get_status
     elif message.content.lower().startswith('!status'):
         await message.channel.send(get_status())
+
+    else:
+        await message.channel.send('Command not in the faucet!')
 
 
 client.run(keys[0])
