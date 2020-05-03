@@ -1,4 +1,5 @@
 import re
+import textwrap
 import urllib
 import discord
 from requests import get
@@ -111,10 +112,11 @@ def craft_calc(search_term, num_crafts):
 
 
 # Returns the best item in i_list matching term. Used for craftcalc and serverpop commands
-# @Param i_list: list of items to compart term to
+# @Param i_list: list of items that have the text attirbute for comparison
 # @Param term: search term entered
+# @Param scorer: scoring method for fuzzywuzzy
 # @Return: Best matching element in i_list
-def get_best_match(i_list, term, scorer):
+def get_best_match(i_list, term, scorer=1):
     # This could be done with fuzzywuzzy's process.extractOne module, but I could not get it to work with a different
     # scorer than WRatio.
     best_item_match = None
@@ -254,6 +256,9 @@ async def on_message(message):
     # Ignore messages from the bot to avoid infinite looping
     if message.author == client.user:
         return
+    # Dont bother processing a message if it isn't a command
+    if not message.content.lower().startswith('!'):
+        return
 
     # TODO Finish command list
     # Display all commands
@@ -329,6 +334,7 @@ async def on_message(message):
     # Ouputs the drop table of a certain loot source
     elif message.content.lower().startswith('!droptable'):
         args = message.content.lower().split()
+        # Print out a table list if the user doesn't enter a specific one
         if len(args) == 1:
             embed = discord.Embed()
             embed.add_field(name="APC Crate", value="\n\u200b", inline=True)
@@ -357,6 +363,68 @@ async def on_message(message):
             embed.add_field(name="Tool Box", value="\n\u200b", inline=True)
             await message.channel.send('This command will display all items dropped from any of the following loot'
                                        ' sources along with their respective drop percentages:\n', embed=embed)
+        # If the user enters a table name, search for it
+        else:
+            # Get all tr's that hold info on loot containers
+            loot_container_html = get_html('https://rustlabs.com/group=containers')
+            # Unfortunately there are a couple loot containers on a different page, so other_html is for the edge case
+            # in which a user searches for one of those
+            other_html = get_html('https://rustlabs.com/group=else')
+            container_links = []
+
+            # From the list of tr's, get their links and put them in a list
+            containers = loot_container_html.find_all('td', {"class": "left"})
+            for container in containers:
+                container_links.append(container.find('a'))
+
+            # Get the other list of tr's on the else page. I could filter these based on the 5 entries I know are needed
+            # but I figure the search algorithm will never match them anyway so there is no harm appending every
+            # entry into the list
+            other_containers = other_html.find_all('td', {"class": "left"})
+            for other_container in other_containers:
+                container_links.append(container.find('a'))
+
+            # Rejoin all args after !droptable to pass it onto get_best_match
+            container_name = ' '.join(args[1:])
+
+            # Once we get the best match, display all droppable items and their drop chances
+            # Start by connecting to the loot table page and retrieving a list of the items
+            best_container = get_best_match(container_links, container_name, 1)
+            container_url = 'https://www.rustlabs.com' + best_container['href'] + '#tab=content;sort=3,1,0'
+            container_html = get_html(container_url)
+            container_table_body = container_html.find('tbody')
+
+            # For each row in the tbody, insert columns 1 and 4 as an entry into an output string. I wanted to
+            # use an embed for its nice columns(which discord doesn't support as of yet) but a lot of the time there
+            # were more than 25 entires which is discord's max for an embed
+            rows = container_table_body.find_all('tr')
+            table_text = {}
+            for row in rows:
+                cols = row.find_all('td')
+                # Store percentage as int for now so we can sort the rows later
+                table_text[cols[1].text.strip()] = float(cols[4].text.strip().rstrip(u'% \n\t\r\xa0'))
+                #table_text += cols[1].text.strip().ljust(30) + '\t' + cols[4].text.strip().rjust(8) + '\n'
+
+            sorted_text = sorted((key, value) for(value, key) in table_text.items())
+
+            table_string = ''
+            for text in sorted_text:
+                table_string += str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%\n'
+            await message.channel.send('Displaying drop table for **' + best_container.text + '**:\n')
+            # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
+            if len(table_string) > 2000:
+                # Split the message every 1900 character, preserving formatting
+                messages = textwrap.wrap(table_string, 1800, break_long_words=False,replace_whitespace=False)
+                # Once the message has been split into a list, iterate through and post it as code to make it look
+                # halfway decent
+                for msg in messages:
+                    await message.channel.send('```' + msg + '```')
+                await message.channel.send('Discord is not hot when it comes to string formatting! Sauce them'
+                                           ' an angry letter if u think this looks like hot dog')
+            else:
+               await message.channel.send('```' + table_string + '```')
+
+
 
     # Output all loot sources that give a certain item
     elif message.content.lower().startswith('!lootfrom'):
@@ -447,8 +515,6 @@ async def on_message(message):
     elif message.content.lower().startswith('!status'):
         await message.channel.send(get_status())
 
-    else:
-        await message.channel.send('Command not in the faucet!')
 
 
 client.run(keys[0])
