@@ -66,7 +66,7 @@ def craft_calc(search_term, num_crafts):
     # Reduce the amount of items returned, and then processed the resulting set against all search terms. However,
     # this led to a lot of bugs and was really bad in general. This solution is far better than my original
     item_list = item_html.find_all('span', {"class": "r-cell"})
-    item = get_best_match(item_list, search_term, 1)
+    item = get_best_match(item_list, search_term)
     if item is None:
         return 'Item not found'
     else:
@@ -116,7 +116,7 @@ def craft_calc(search_term, num_crafts):
 # @Param term: search term entered
 # @Param scorer: scoring method for fuzzywuzzy
 # @Return: Best matching element in i_list
-def get_best_match(i_list, term, scorer=1):
+def get_best_match(i_list, term):
     # This could be done with fuzzywuzzy's process.extractOne module, but I could not get it to work with a different
     # scorer than WRatio.
     best_item_match = None
@@ -222,6 +222,22 @@ def get_rust_items(item_url):
     return item_dict, total_price
 
 
+# Gets an item from the RustLabs item page with name closest matching item_name
+# Will be used to fetch item stats, skins, recycle output, etc
+# @Param item_name: The user's search terms
+# @Return: The item closest matching the search terms
+def get_item(item_name):
+    # Navigate to the item page of Rustlabs and put all items(links) in a list
+    item_html = get_html('https://rustlabs.com/group=itemlist')
+    item_links = []
+    # From the list of tr's, get their links and put them in a list
+    for item in item_html.find_all('a', {"class": "pad"}):
+        item_links.append(item)
+    # Get the best matching link to our item_name and return it
+    matching_item = get_best_match(item_links, item_name)
+    return matching_item
+
+
 # Gets a BeautifulSoup html object from a given url, and prints out an error if there was an error connecting
 def get_html(url):
     with closing(get(url, stream=True)) as resp:
@@ -231,6 +247,7 @@ def get_html(url):
             return html
         else:
             return ''
+
 
 # For an input amount of sulfur, display how many rockets, c4, etc you can craft
 # @Param sulfur: How much sulfur the user has
@@ -304,7 +321,7 @@ async def on_message(message):
                 if i.find('a'):
                     servers.append(i.find('a'))
             # Find the best match given the new list of servers and all search terms
-            best_match = get_best_match(servers, serv_name, 2)
+            best_match = get_best_match(servers, serv_name)
             # If get_best_match returns an empty string, there was no matching server
             if best_match == '':
                 await message.channel.send('Server not found')
@@ -393,7 +410,7 @@ async def on_message(message):
 
             # Once we get the best match, display all droppable items and their drop chances
             # Start by connecting to the loot table page and retrieving a list of the items
-            best_container = get_best_match(container_links, container_name, 1)
+            best_container = get_best_match(container_links, container_name)
             container_url = 'https://www.rustlabs.com' + best_container['href'] + '#tab=content;sort=3,1,0'
             container_html = get_html(container_url)
             # Hack for loot tables that have HP values(scientists, etc)
@@ -401,15 +418,21 @@ async def on_message(message):
             container_table_body = container_table.find('tbody')
             # For each row in the tbody, insert columns 1 and 4 as an entry into an output string. I wanted to
             # use an embed for its nice columns(which discord doesn't support as of yet) but a lot of the time there
-            # were more than 25 entires which is discord's max for an embed
+            # were more than 25 entries which is discord's max for an embed
             rows = container_table_body.find_all('tr')
             table_text = {}
             for row in rows:
                 cols = row.find_all('td')
-                # Store percentage as int for now so we can sort the rows later
-                table_text[cols[1].text.strip()] = float(cols[4].text.strip().rstrip(u'% \n\t\r\xa0'))
+                # Store percentage as a float for now so we can sort the rows later by stripping the percent sign and
+                # any whitespace with regex
+                try:
+                    table_text[cols[1].text.strip()] = float(cols[4].text.strip().rstrip(u'% \n\t\r\xa0'))
+                except Exception as e:
+                    await message.channel.send(best_container.text + ' has no drop table. If this was not the item you'
+                                                                     ' were looking for enter a more specific name')
+                    return
 
-            sorted_text = sorted((key, value) for(value, key) in table_text.items())
+            sorted_text = sorted((key, value) for (value, key) in table_text.items())
 
             table_string = ''
             for text in sorted_text:
@@ -426,7 +449,7 @@ async def on_message(message):
                 await message.channel.send('Discord is not hot when it comes to string formatting! Sauce them'
                                            ' an angry letter if u think this looks like hot dog')
             else:
-               await message.channel.send('```' + table_string + '```')
+                await message.channel.send('```' + table_string + '```')
 
 
 
@@ -437,9 +460,48 @@ async def on_message(message):
         if len(args) == 1:
             await message.channel.send('This command will display all loot sources that drop a certain item, along '
                                        'with their respective percentages. Use **!lootfrom [itemName]**')
-        # If the user enters an item, search for it
+        # If the user enters an item, search for it. Get a list of all items and find the one matching the user's
+        # search term(s)
         else:
-            pass
+            best_item = get_item(' '.join(args[1:]))
+            item_url = 'https://www.rustlabs.com' + best_item['href'] + '#tab=loot;sort=3,1,0'
+            container_html = get_html(item_url)
+            # Hack for items that have stats(damage/protection values, etc.)
+            item_table = container_html.find('table', {"class": "table w100 olive sorting"})
+            item_table_body = item_table.find('tbody')
+            # For each row in the tbody, insert columns 1 and 4 as an entry into an output string. I wanted to
+            # use an embed for its nice columns(which discord doesn't support as of yet) but a lot of the time there
+            # were more than 25 entries which is discord's max for an embed
+            rows = item_table_body.find_all('tr')
+            table_text = {}
+            for row in rows:
+                cols = row.find_all('td')
+                # Store percentage as a float for now so we can sort the rows later using regex to stip the percent sign
+                # and any whitespace
+                try:
+                    table_text[cols[0].text.strip()] = float(cols[3].text.strip().rstrip(u'% \n\t\r\xa0'))
+                except Exception as e:
+                    await message.channel.send(best_item.text + ' has no loot source. If this was not the item you '
+                                                                'were looking enter a more specific name')
+                    return
+            # Once we get all of the drop data, sort it based on drop percentage
+            sorted_text = sorted((key, value) for (value, key) in table_text.items())
+            table_string = ''
+            for text in sorted_text:
+                table_string += str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%\n'
+            await message.channel.send('Displaying drop percentages for **' + best_item.text + '**:\n')
+            # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
+            if len(table_string) > 2000:
+                # Split the message every 1900 character, preserving formatting
+                messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
+                # Once the message has been split into a list, iterate through and post it as code to make it look
+                # halfway decent
+                for msg in messages:
+                    await message.channel.send('```' + msg + '```')
+                await message.channel.send('Discord is not hot when it comes to string formatting! Sauce them'
+                                           ' an angry letter if u think this looks like hot dog')
+            else:
+                await message.channel.send('```' + table_string + '```')
 
     # Outputs how many explosives you can craft with x sulfur
     elif message.content.lower().startswith('!sulfur'):
@@ -480,7 +542,7 @@ async def on_message(message):
             for item in items:
                 item_text = '**' + item + '**'
                 embed.add_field(name='**' + item_text + '**', value=items[item], inline=False)
-            embed.add_field(name = '**Total Price:** ', value=total_item_price, inline=False)
+            embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
             item_str = 'Item store: ' + store_url + '\n\n'
             await message.channel.send(item_str, embed=embed)
 
@@ -525,7 +587,6 @@ async def on_message(message):
     # Get status of all servers the bot depends on with get_status
     elif message.content.lower().startswith('!status'):
         await message.channel.send(get_status())
-
 
 
 client.run(keys[0])
