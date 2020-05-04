@@ -122,11 +122,12 @@ def get_best_match(i_list, term, scorer=1):
     best_item_match = None
     best_item_match_num = 0
     for i in i_list:
-        # Get the item with the best ratio using fuzzywuzzy, depending on the ratio scorer parameter
-        if scorer == 1:
-            temp_ratio = fuzz.token_sort_ratio(term, i.text)
-        elif scorer == 2:
-            temp_ratio = fuzz.token_set_ratio(term, i.text)
+        # Get an average of multiple fuzzywuzzy scorers to get a better match
+        r = fuzz.ratio(term, i.text)
+        s = fuzz.token_set_ratio(term, i.text)
+        srt = fuzz.token_sort_ratio(term, i.text)
+        p = fuzz.partial_ratio(term, i.text)
+        temp_ratio = (r + s + srt + p) / 4
 
         if temp_ratio > best_item_match_num:
             best_item_match = i
@@ -231,7 +232,9 @@ def get_html(url):
         else:
             return ''
 
-
+# For an input amount of sulfur, display how many rockets, c4, etc you can craft
+# @Param sulfur: How much sulfur the user has
+# @Return: A string containing how many of each explosive they can craft
 def sulf_calc(sulfur):
     rocket_sulf = 1400
     explo_sulf = 25
@@ -332,6 +335,7 @@ async def on_message(message):
         await message.channel.send('Newest Rust Devblog:', embed=embed)
 
     # Ouputs the drop table of a certain loot source
+    # TODO fix item searching algorithm
     elif message.content.lower().startswith('!droptable'):
         args = message.content.lower().split()
         # Print out a table list if the user doesn't enter a specific one
@@ -382,7 +386,7 @@ async def on_message(message):
             # entry into the list
             other_containers = other_html.find_all('td', {"class": "left"})
             for other_container in other_containers:
-                container_links.append(container.find('a'))
+                container_links.append(other_container.find('a'))
 
             # Rejoin all args after !droptable to pass it onto get_best_match
             container_name = ' '.join(args[1:])
@@ -392,8 +396,9 @@ async def on_message(message):
             best_container = get_best_match(container_links, container_name, 1)
             container_url = 'https://www.rustlabs.com' + best_container['href'] + '#tab=content;sort=3,1,0'
             container_html = get_html(container_url)
-            container_table_body = container_html.find('tbody')
-
+            # Hack for loot tables that have HP values(scientists, etc)
+            container_table = container_html.find('table', {"class": "table w100 olive sorting"})
+            container_table_body = container_table.find('tbody')
             # For each row in the tbody, insert columns 1 and 4 as an entry into an output string. I wanted to
             # use an embed for its nice columns(which discord doesn't support as of yet) but a lot of the time there
             # were more than 25 entires which is discord's max for an embed
@@ -403,7 +408,6 @@ async def on_message(message):
                 cols = row.find_all('td')
                 # Store percentage as int for now so we can sort the rows later
                 table_text[cols[1].text.strip()] = float(cols[4].text.strip().rstrip(u'% \n\t\r\xa0'))
-                #table_text += cols[1].text.strip().ljust(30) + '\t' + cols[4].text.strip().rjust(8) + '\n'
 
             sorted_text = sorted((key, value) for(value, key) in table_text.items())
 
@@ -414,7 +418,7 @@ async def on_message(message):
             # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
             if len(table_string) > 2000:
                 # Split the message every 1900 character, preserving formatting
-                messages = textwrap.wrap(table_string, 1800, break_long_words=False,replace_whitespace=False)
+                messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
                 # Once the message has been split into a list, iterate through and post it as code to make it look
                 # halfway decent
                 for msg in messages:
@@ -428,7 +432,14 @@ async def on_message(message):
 
     # Output all loot sources that give a certain item
     elif message.content.lower().startswith('!lootfrom'):
-        pass
+        args = message.content.lower().split()
+        # Print out a table list if the user doesn't enter a specific one
+        if len(args) == 1:
+            await message.channel.send('This command will display all loot sources that drop a certain item, along '
+                                       'with their respective percentages. Use **!lootfrom [itemName]**')
+        # If the user enters an item, search for it
+        else:
+            pass
 
     # Outputs how many explosives you can craft with x sulfur
     elif message.content.lower().startswith('!sulfur'):
