@@ -125,9 +125,8 @@ def get_best_match(i_list, term):
         # Get an average of multiple fuzzywuzzy scorers to get a better match
         r = fuzz.ratio(term, i.text)
         s = fuzz.token_set_ratio(term, i.text)
-        srt = fuzz.token_sort_ratio(term, i.text)
         p = fuzz.partial_ratio(term, i.text)
-        temp_ratio = (r + s + srt + p) / 4
+        temp_ratio = (r + s + p) / 3
 
         if temp_ratio > best_item_match_num:
             best_item_match = i
