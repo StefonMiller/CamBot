@@ -1,6 +1,9 @@
+import os
 import re
 import textwrap
 import urllib
+from time import strftime, gmtime
+
 import discord
 from requests import get
 from requests.exceptions import RequestException
@@ -567,9 +570,57 @@ async def on_message(message):
 
             await message.channel.send(table_text)
 
-    elif message.channel.lower().startswith('!furnaceratios'):
-        pass
+    # Outputs the most efficient furnace ratios for a specific furnace and ore type
+    elif message.content.lower().startswith('!furnaceratios'):
+        args = message.content.lower().split()
+        # Print out a command description if the user doesn't enter an item name
+        if len(args) == 1:
+            await message.channel.send('This command will display the appropriate furnace ratio for the furnace and '
+                                       'ore type specified. Use **!furnaceratios [small/large] [metal/sulfur]**')
 
+        else:
+            # Check if the user entered too many or too few arguments
+            if len(args) == 3:
+                # If set the size to whatever size the user entered. This is used to find the appropriate images
+                if args[1] == 'large':
+                    furnace_size = 'lf'
+                elif args[1] == 'small':
+                    furnace_size = 'sf'
+                # If the user didn't enter large or small, then their input is invalid
+                else:
+                    await message.channel.send(
+                        'You entered an invalid furnace size. Please enter \'small\' or \'large\'')
+                    return
+                # Assign whatever ore the user entered to ore_type. If they entered something improperly, we simply wont
+                # return any images
+                ore_type = args[2]
+                # Get all images in the Rust folder containing the appropriate furnace size and ore type
+                await message.channel.send('Displaying ' + ore_type + ' ratios for a ' + args[1] + ' furnace:\n\n')
+                img_path = 'C:/Users/Stefon/PycharmProjects/CamBot/Rust/'
+                for img in os.listdir(img_path):
+                    if furnace_size in img[0:2]:
+                        if ore_type in img:
+                            file = discord.File(img_path + img, filename=img)
+                            embed = discord.Embed()
+                            # Get the wood amount from the image name
+                            temp_amts = re.findall(r"[-+]?\d*\.\d+|\d+", img)
+                            wood_amt = int(float(temp_amts[0]) * 1000)
+                            ore_amt = temp_amts[1]
+                            # Wood takes 2 seconds to smelt in any furnace. So the total time is wood * 2
+                            time = strftime("%X", gmtime(wood_amt*2))
+                            # Output each appropriate image and the corresponding smelting data
+                            img_text = '**' + str(wood_amt) + '** wood' + ' will smelt **' + str(ore_amt) + '** ' \
+                                       + args[2] + ' and will take **' + time + '**'
+                            embed.set_image(url="attachment://" + img)
+                            await message.channel.send(img_text, file=file, embed=embed)
+
+
+            elif len(args) > 3:
+                await message.channel.send('You entered too many arguments. use !furnaceratios for proper syntax')
+                return
+            else:
+                await message.channel.send('You entered too few arguments. Use !furnaceratios for proper syntax')
+                return
     # Outputs how many explosives you can craft with x sulfur
     elif message.content.lower().startswith('!sulfur'):
         args = message.content.lower().split()
