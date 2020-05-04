@@ -451,11 +451,10 @@ async def on_message(message):
                 await message.channel.send('```' + table_string + '```')
 
 
-
     # Output all loot sources that give a certain item
     elif message.content.lower().startswith('!lootfrom'):
         args = message.content.lower().split()
-        # Print out a table list if the user doesn't enter a specific one
+        # Print out a command description if the user doesn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will display all loot sources that drop a certain item, along '
                                        'with their respective percentages. Use **!lootfrom [itemName]**')
@@ -501,6 +500,75 @@ async def on_message(message):
                                            ' an angry letter if u think this looks like hot dog')
             else:
                 await message.channel.send('```' + table_string + '```')
+
+    # Output general smelting info about a certain item.
+    elif message.content.lower().startswith('!smelting'):
+        args = message.content.lower().split()
+        # Print out a command description if the user doesn't enter a second argument
+        if len(args) == 1:
+            embed = discord.Embed()
+            embed.add_field(name="Barbeque", value="\n\u200b", inline=False)
+            embed.add_field(name="Camp Fire", value="\n\u200b", inline=False)
+            embed.add_field(name="Furnace", value="\n\u200b", inline=False)
+            embed.add_field(name="Large Furnace", value="\n\u200b", inline=False)
+            embed.add_field(name="Small Oil Refinery", value="\n\u200b", inline=False)
+            await message.channel.send('This command will display smelting data for a given item with '
+                                       '**!smelting [itemName]** \nThe following items are currently supported:',
+                                       embed=embed)
+
+        # If the user enters an item, look for it in the current list of supported items
+        else:
+            # Hardcode all of the supported smelting items into a BS4 tag list and get the best match. This seems
+            # much more efficient than scanning all items as I would have to compare them to these 5 values anyways
+            # and the former option would be way slower than this. Additionally, a smelting item hasn't been added to
+            # rust in years so it seems safe to hardcode them
+            item_name = ' '.join(args[1:])
+
+            # Create a tag for each supported item and pass them off to get_best_match as a list of tags
+            soup = BeautifulSoup(features="lxml")
+            smelt_links = []
+            temp_link1 = soup.new_tag('a', href='https://rustlabs.com/item/barbeque#tab=smelting')
+            temp_link1.string = 'Barbeque'
+            smelt_links.append(temp_link1)
+            temp_link2 = soup.new_tag('a', href='https://rustlabs.com/item/camp-fire#tab=smelting')
+            temp_link2.string = 'Camp Fire'
+            smelt_links.append(temp_link2)
+            temp_link3 = soup.new_tag('a', href='https://rustlabs.com/item/furnace#tab=smelting')
+            temp_link3.string = 'Furnace'
+            smelt_links.append(temp_link3)
+            temp_link4 = soup.new_tag('a', href='https://rustlabs.com/item/large-furnace#tab=smelting')
+            temp_link4.string = 'Large Furnace'
+            smelt_links.append(temp_link4)
+            temp_link5 = soup.new_tag('a', href='https://rustlabs.com/item/small-oil-refinery#tab=smelting')
+            temp_link5.string = 'Small Oil Refinery'
+            smelt_links.append(temp_link5)
+
+            best_smelt = get_best_match(smelt_links, item_name)
+            best_smelt_html = get_html(best_smelt['href'])
+            best_smelt_table = best_smelt_html.find('div', {"data-name": "smelting"}).find('table', {
+                "class": "table w100 olive"}).find('tbody')
+            rows = best_smelt_table.find_all('tr')
+            table_text = 'Displaying smelting stats for **' + best_smelt.text + '**```'
+            for row in rows:
+                cols = row.find_all('a')
+                # If there are only 2 entries in the row, we are at the end of the table
+                if len(cols) == 2:
+                    pass
+                else:
+                    # Try to parse the smelting data, if we are unable to then the item has no smelting data
+                    try:
+                        table_text += 'It takes ' + cols[1].find('span').text[1:] + ' wood to smelt 1 ' + \
+                                      cols[0].find('img')['alt'] + '\n'
+                    except Exception as e:
+                        await message.channel.send('There is no smelting data for ' +
+                                                   best_smelt.text + '. If this is not the item you searched for, '
+                                                                     'please be more specific')
+            table_text += '```'
+
+            await message.channel.send(table_text)
+
+    elif message.channel.lower().startswith('!furnaceratios'):
+        pass
 
     # Outputs how many explosives you can craft with x sulfur
     elif message.content.lower().startswith('!sulfur'):
