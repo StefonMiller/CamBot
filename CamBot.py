@@ -4,15 +4,14 @@ import re
 import textwrap
 import urllib
 from time import strftime, gmtime
-
 import discord
 from requests import get
-from requests.exceptions import RequestException
 from contextlib import closing
 from bs4 import BeautifulSoup
 import tweepy
 from datetime import datetime
 from fuzzywuzzy import fuzz
+import cv2;
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -20,19 +19,6 @@ with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
     f.close()
 # Create client object for discord integration
 client = discord.Client()
-
-
-# List all working commands for the discord bot
-def list_commands():
-    return ('Here is a list of commands:\n'
-            '\t**!craftcalc** outputs the recipe of a certain item\n'
-            '\t**!status** gives you the current status of Cambot\'s dependent servers\n'
-            '\t**!serverpop** gives the current pop for our frequented servers. Use !serverpop [servername] to get '
-            'information about another server\n'
-            '\t**!devblog** posts a link to the newest devblog with a short summary\n'
-            '\t**!rustnews** posts a link to the latest news on the new Rust update\n'
-            '\t**!rustitems** displays all items on the rust store along with prices\n')
-
 
 # Returns the player count of a certain server URL on Battlemetrics.com
 # @Param serv_url: - url of the server we want the player count of
@@ -326,9 +312,7 @@ async def on_voice_state_update(member, before, after):
             except Exception as e:
                 print('SQUADDIES IS NOT A TEXT CHANNEL NOT HOTTTT')
 
-
-
-
+@client.event
 async def on_message(message):
     # Ignore messages from the bot to avoid infinite looping
     if message.author == client.user:
@@ -338,9 +322,27 @@ async def on_message(message):
         return
 
     # TODO Finish command list
-    # Display all commands
-    if message.content.lower().startswith('!cambot help'):
-        await message.channel.send(list_commands())
+    # Display all commands. This was originally a function call but I didn't really see the point if using embeds
+    if message.content.lower().startswith('!cambot'):
+        embed = discord.Embed()
+        embed.add_field(name="**!craftcalc**", value="Outputs the recipe of an item", inline=False)
+        embed.add_field(name="**!status**", value="Outputs the current status of CamBot's dependent servers", inline=False)
+        embed.add_field(name="**!serverpop**", value="Outputs the current pop of any server", inline=False)
+        embed.add_field(name="**!devblog**", value="Posts a link to the newest devblog with a short summary", inline=False)
+        embed.add_field(name="**!rustnews**", value="Posts a link to the latest news on Rust's development info", inline=False)
+        embed.add_field(name="**!rustitems**", value="Displays all items on the Rust store along with prices", inline=False)
+        embed.add_field(name="**!droptable**", value="Outputs the drop table for a crate/NPC", inline=False)
+        embed.add_field(name="**!lootfrom**", value="Outputs drop rates for a specific item", inline=False)
+        embed.add_field(name="**!sulfur**", value="Outputs how many explosives you can craft with a specific sulfur "
+                                                  "amount", inline=False)
+        embed.add_field(name="**!furnaceratios**", value="Shows the most efficient furnace ratios for a given furnace "
+                                                         "and ore type", inline=False)
+        embed.add_field(name="**!smelting**", value="Shows smelting data for a given item", inline=False)
+        embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False)
+        await message.channel.send('Here is a list of commands. Call them without arguments '
+                                   'for more info:\n', embed=embed)
+
+
 
     # Checks pop of frequented servers if no server argument, and searches for a specific server if specified
     elif message.content.lower().startswith('!serverpop'):
@@ -352,7 +354,8 @@ async def on_message(message):
             await message.channel.send('Rustafied Trio currently has ' + server_pop(
                 'https://www.battlemetrics.com/servers/rust/2634280') + ' players online\n'
                                                                         'Bloo Lagoon currently has ' + server_pop(
-                'https://www.battlemetrics.com/servers/rust/3461363') + ' players online')
+                'https://www.battlemetrics.com/servers/rust/3461363') + ' players online\n\n'
+                                                                        'For specific server pop, use **!serverpop [servername]**')
         # If there is a server argument, add any arguments after !serverpop to the server name
         else:
             serv_name = ""
@@ -506,6 +509,20 @@ async def on_message(message):
                                            ' an angry letter if u think this looks like hot dog')
             else:
                 await message.channel.send('```' + table_string + '```')
+
+    # Posts a random picture from a given folder
+    elif message.content.lower().startswith('!campic'):
+        img_path = 'C:/Users/Stefon/PycharmProjects/CamBot/Cam/'
+        pics=[]
+        # Get the filenames of all images in the directory
+        for fileName in os.listdir(img_path):
+            pics.append(fileName)
+
+        # Select a random filename from the list and upload the corresponding image
+        rand_pic = random.choice(pics)
+        print(img_path + rand_pic)
+        file = discord.File(img_path + rand_pic, filename=rand_pic)
+        await message.channel.send(file=file)
 
 
     # Output all loot sources that give a certain item
@@ -683,11 +700,11 @@ async def on_message(message):
         args = message.content.lower().split()
         # If len(args) is 1, the user didn't enter an item name
         if len(args) == 1:
-            await message.channel.send('To use !sulfur, enter the amount of sulfur you have. I will then spit oot'
-                                       ' how many of each explosive you can SAUCE')
+            await message.channel.send('This command will output the amount of explosives you can sauce with a given '
+                                       'sulfur amount. Use **!sulfur [sulfuramount]**')
         elif len(args) > 2:
-            await message.channel.send('Too many arguments, please enter !suflur [sulfur amount]. If you have gunpower,'
-                                       ' simply multiply it by 2 to get the amount of sulfur')
+            await message.channel.send('Too many arguments, please enter **!suflur [sulfuramount]**.'
+                                       ' If you have gunpower, simply multiply it by 2 to get the amount of sulfur')
         else:
             num_sulf = -1
             try:
@@ -728,7 +745,8 @@ async def on_message(message):
         args = message.content.lower().split()
         # If len(args) is 1, the user didn't enter an item name
         if len(args) == 1:
-            await message.channel.send('Please enter an item name')
+            await message.channel.send('This command will output the recipe of any item in rust that has a recipe.\n'
+                                       'Use **!craftcalc [itemname] [quantity]**')
         else:
             for i in args:
                 # Omit the !craftcalc command and the item number from the item name
