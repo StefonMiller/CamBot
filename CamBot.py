@@ -1,4 +1,5 @@
 import os
+import random
 import re
 import textwrap
 import urllib
@@ -16,6 +17,7 @@ from fuzzywuzzy import fuzz
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
     keys = f.read().splitlines()
+    f.close()
 # Create client object for discord integration
 client = discord.Client()
 
@@ -274,6 +276,59 @@ async def on_ready():
 
 
 @client.event
+# This function runs whenever someone joins or leaves a voice channel. I mainly made it for my personal discord server,
+# but it will work with any other server as long as they have a 'rust' voice channel and 'squaddies' text channel
+async def on_voice_state_update(member, before, after):
+    # If the user left the server check if they left the rust channel
+    if after.channel is None:
+        if before.channel.name.lower() == 'rust':
+            output_channel = ''
+            # Get the output server, in this case it will be squaddies
+            for server in client.guilds:
+                for channel in server.channels:
+                    if channel.name.lower() == 'squaddies':
+                        output_channel = channel
+            if output_channel == '':
+                pass
+            # Print a leaving message
+            else:
+                leave_string = ''
+                with open('C:/Users/Stefon/PycharmProjects/CamBot/leavestrings.txt') as leave:
+                    leave_strings = leave.read().splitlines()
+                    leave_string = random.choice(leave_strings)
+                    f.close()
+                # If an exception is raised when trying to send a message, then squaddies is not a text channel
+                try:
+                    await output_channel.send(member.name + ' left ' + leave_string)
+                except Exception as e:
+                    print('SQUADDIES IS NOT A TEXT CHANNEL NOT HOTTTT')
+
+    # If the user didn't leave the server, check if they moved to the 'rust' channel
+    elif after.channel.name.lower() == 'rust':
+        output_channel = ''
+        # Get the output server, in this case it will be named squaddies
+        for server in client.guilds:
+            for channel in server.channels:
+                if channel.name.lower() == 'squaddies':
+                    output_channel = channel
+        # Print a join message
+        if output_channel == '':
+            pass
+        else:
+            join_string = ''
+            with open('C:/Users/Stefon/PycharmProjects/CamBot/joinstrings.txt') as join:
+                join_strings = join.read().splitlines()
+                join_string = random.choice(join_strings)
+                f.close()
+            # If an exception is raised when trying to send a message, then squaddies is not a text channel
+            try:
+                await output_channel.send(member.name + ' joined ' + join_string)
+            except Exception as e:
+                print('SQUADDIES IS NOT A TEXT CHANNEL NOT HOTTTT')
+
+
+
+
 async def on_message(message):
     # Ignore messages from the bot to avoid infinite looping
     if message.author == client.user:
@@ -354,7 +409,6 @@ async def on_message(message):
         await message.channel.send('Newest Rust Devblog:', embed=embed)
 
     # Ouputs the drop table of a certain loot source
-    # TODO fix item searching algorithm
     elif message.content.lower().startswith('!droptable'):
         args = message.content.lower().split()
         # Print out a table list if the user doesn't enter a specific one
@@ -591,9 +645,12 @@ async def on_message(message):
                     await message.channel.send(
                         'You entered an invalid furnace size. Please enter \'small\' or \'large\'')
                     return
-                # Assign whatever ore the user entered to ore_type. If they entered something improperly, we simply wont
-                # return any images
-                ore_type = args[2]
+                # Assign whatever ore the user entered to ore_type, ensuring 'metal' or 'sulfur' were entered
+                if args[2] == 'metal' or args[2] == 'sulfur':
+                    ore_type = args[2]
+                else:
+                    await message.channel.send('The given ore type is invalid. Please enter \'sulfur\' or \'metal\'')
+                    return
                 # Get all images in the Rust folder containing the appropriate furnace size and ore type
                 await message.channel.send('Displaying ' + ore_type + ' ratios for a ' + args[1] + ' furnace:\n\n')
                 img_path = 'C:/Users/Stefon/PycharmProjects/CamBot/Rust/'
@@ -607,7 +664,7 @@ async def on_message(message):
                             wood_amt = int(float(temp_amts[0]) * 1000)
                             ore_amt = temp_amts[1]
                             # Wood takes 2 seconds to smelt in any furnace. So the total time is wood * 2
-                            time = strftime("%X", gmtime(wood_amt*2))
+                            time = strftime("%X", gmtime(wood_amt * 2))
                             # Output each appropriate image and the corresponding smelting data
                             img_text = '**' + str(wood_amt) + '** wood' + ' will smelt **' + str(ore_amt) + '** ' \
                                        + args[2] + ' and will take **' + time + '**'
