@@ -5,13 +5,14 @@ import textwrap
 import urllib
 from time import strftime, gmtime
 import discord
+from steam_community_market import Market, AppID
 from requests import get
 from contextlib import closing
 from bs4 import BeautifulSoup
 import tweepy
 from datetime import datetime
 from fuzzywuzzy import fuzz
-import cv2;
+import mysql.connector
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -20,6 +21,7 @@ with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
 # Create client object for discord integration
 client = discord.Client()
 
+
 # Returns the player count of a certain server URL on Battlemetrics.com
 # @Param serv_url: - url of the server we want the player count of
 # @Return: - number of players on the server
@@ -27,6 +29,32 @@ def server_pop(serv_url):
     serv_html = get_html(serv_url)
     pop = serv_html.find('dt', string='Player count').find_next_sibling('dd')
     return pop.text
+
+
+# Connect to the MySQL server and get the item corresponding to the best_skin found above
+with open('C:/Users/Stefon/PycharmProjects/CamBot/serverinfo.txt') as f:
+    info = f.read().splitlines()
+    f.close()
+cursor = None
+try:
+    connection = mysql.connector.connect(
+        host=info[0],
+        database=info[1],
+        user=info[2],
+        password=info[3]
+    )
+
+    if connection.is_connected():
+        db_Info = connection.get_server_info()
+        cursor = connection.cursor()
+except Exception as e:
+    pass
+
+
+# Gets all items in the rust item store and stores them in the skin database
+# TODO Implement this
+def insert_items():
+    pass
 
 
 # Gets the status of all servers the CamBot is dependent on
@@ -101,6 +129,7 @@ def craft_calc(search_term, num_crafts):
 
             return craft_string
 
+
 # Returns the best item in i_list matching term. Used for craftcalc and serverpop commands
 # @Param i_list: list of items that have the text attirbute for comparison
 # @Param term: search term entered
@@ -123,6 +152,33 @@ def get_best_match(i_list, term):
 
         if temp_ratio > best_item_match_num:
             best_item_match = i
+            best_item_match_num = temp_ratio
+        else:
+            pass
+    return best_item_match
+
+
+# Returns the best item in str_list matching search_term. Identical to get_best_match, but this is for SQL rows
+# @Param str_list: list of rows for comparison
+# @Param search_term: search term entered
+# @Return: Best matching element in str_list
+def get_string_best_match(str_list, search_term):
+    # This could be done with fuzzywuzzy's process.extractOne module, but I could not get it to work with a different
+    # scorer than WRatio.
+    best_item_match = None
+    best_item_match_num = 0
+    for str in str_list:
+        # Get an average of multiple fuzzywuzzy scorers to get a better match. Note w is not averaged as its score
+        # Is the most valued out of the 5 scorers
+        r = fuzz.ratio(search_term, str)
+        s = fuzz.token_set_ratio(search_term, str)
+        p = fuzz.partial_ratio(search_term, str)
+        w = fuzz.WRatio(search_term, str)
+        srt = fuzz.token_sort_ratio(search_term, str)
+        temp_ratio = (r + s + p + srt) / 4 + w
+
+        if temp_ratio > best_item_match_num:
+            best_item_match = str
             best_item_match_num = temp_ratio
         else:
             pass
@@ -257,6 +313,11 @@ def sulf_calc(sulfur):
                   '** C4 with **' + str(sulfur % c4_sulf) + '** sulfur left over'
     return sulf_string
 
+
+# Return the recycle output for a given item
+# @Param search_term item user is searching for
+# @Param num_items number of items the user is recycling
+# @Return the output of recycling num_items search_terms
 def recycle(search_term, num_items):
     item_url = 'https://rustlabs.com/group=itemlist'
     item_html = get_html(item_url)
@@ -276,11 +337,14 @@ def recycle(search_term, num_items):
         recycle_name = recycle_html.find('h1').text
         # Get all resource/component outputs from the recycle output and their respective drop chances
         try:
-            recycle_output = recycle_html.find('div', {"data-name": "recycle"}).find('td', {"class": "no-padding"}).find_all('a')
+            recycle_output = recycle_html.find('div', {"data-name": "recycle"}).find('td',
+                                                                                     {"class": "no-padding"}).find_all(
+                'a')
         except Exception as e:
             return recycle_name + ' cannot be recycled'
 
-        print(recycle_name)
+        # Output the recycling data. If an output has a drop chance, output its expected value for the number of items
+        # being recycled
         recycle_text = 'Displaying recycling output for ' + str(num_items) + ' **' + recycle_name + '**:\n'
         for output in recycle_output:
             recycle_name = output.find('img')['alt']
@@ -289,23 +353,25 @@ def recycle(search_term, num_items):
                 recycle_quantity = 1 * num_items
                 recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
             elif '%' in recycle_quantity:
-                recycle_percent = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items //100
-                recycle_text += '\tYou should expect to get ' + str(recycle_percent) + ' ' + recycle_name + '(' + recycle_quantity + ' chance for each item)\n'
+                recycle_percent = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items // 100
+                recycle_text += '\tYou should expect to get ' + str(
+                    recycle_percent) + ' ' + recycle_name + '(' + recycle_quantity + ' chance for each item)\n'
             else:
                 recycle_quantity = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items
                 recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
 
         return recycle_text
 
+
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
+
 
 @client.event
 # This function runs whenever someone joins or leaves a voice channel. I mainly made it for my personal discord server,
 # but it will work with any other server as long as they have a 'rust' voice channel and 'squaddies' text channel
 async def on_voice_state_update(member, before, after):
-
     # If the user left the server check if they left the rust channel
     if after.channel is None:
         if before.channel.name.lower() == 'rust':
@@ -356,6 +422,7 @@ async def on_voice_state_update(member, before, after):
             except Exception as e:
                 print('SQUADDIES IS NOT A TEXT CHANNEL NOT HOTTTT')
 
+
 @client.event
 async def on_message(message):
     # Ignore messages from the bot to avoid infinite looping
@@ -370,11 +437,15 @@ async def on_message(message):
     if message.content.lower().startswith('!cambot'):
         embed = discord.Embed()
         embed.add_field(name="**!craftcalc**", value="Outputs the recipe of an item", inline=False)
-        embed.add_field(name="**!status**", value="Outputs the current status of CamBot's dependent servers", inline=False)
+        embed.add_field(name="**!status**", value="Outputs the current status of CamBot's dependent servers",
+                        inline=False)
         embed.add_field(name="**!serverpop**", value="Outputs the current pop of any server", inline=False)
-        embed.add_field(name="**!devblog**", value="Posts a link to the newest devblog with a short summary", inline=False)
-        embed.add_field(name="**!rustnews**", value="Posts a link to the latest news on Rust's development info", inline=False)
-        embed.add_field(name="**!rustitems**", value="Displays all items on the Rust store along with prices", inline=False)
+        embed.add_field(name="**!devblog**", value="Posts a link to the newest devblog with a short summary",
+                        inline=False)
+        embed.add_field(name="**!rustnews**", value="Posts a link to the latest news on Rust's development info",
+                        inline=False)
+        embed.add_field(name="**!rustitems**", value="Displays all items on the Rust store along with prices",
+                        inline=False)
         embed.add_field(name="**!droptable**", value="Outputs the drop table for a crate/NPC", inline=False)
         embed.add_field(name="**!lootfrom**", value="Outputs drop rates for a specific item", inline=False)
         embed.add_field(name="**!sulfur**", value="Outputs how many explosives you can craft with a specific sulfur "
@@ -382,18 +453,22 @@ async def on_message(message):
         embed.add_field(name="**!furnaceratios**", value="Shows the most efficient furnace ratios for a given furnace "
                                                          "and ore type", inline=False)
         embed.add_field(name="**!smelting**", value="Shows smelting data for a given item", inline=False)
-        embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False)
+        embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False),
+        embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=False),
+        embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=False)
         await message.channel.send('Here is a list of commands. Call them without arguments '
                                    'for more info:\n', embed=embed)
 
+    # Outputs recycle data for a given item and item quantity
     elif message.content.lower().startswith('!recycle'):
         # Split the input command into a list
         args = message.content.lower().split()
-        # If len(args) is 1, the user did not enter a server argument
+        # If len(args) is 1, output a command description
         if len(args) == 1:
             await message.channel.send('This command will display the recycle output for a given item. Use '
                                        '**!recycle [itemname] [itemquantity]**')
         else:
+            # Get the item name and quantity from the user input
             recycle_name = []
             for i in args:
                 # Omit the !recycle command and the item number from the item name
@@ -408,10 +483,10 @@ async def on_message(message):
                 if args[-1] <= 0:
                     await message.channel.send('Please enter a valid number')
                 else:
-                    # If the user entered a valid amount, call craft_calc with the amount
+                    # If the user entered a valid amount, call recycle with the amount
                     recycle_num = args[-1]
                     await message.channel.send(recycle(' '.join(recycle_name), recycle_num))
-            # If the user didn't enter an amount, add the last word to the item name and call craft_calc with 1 as
+            # If the user didn't enter an amount, add the last word to the item name and call recycle with 1 as
             # the amount
             except Exception as e:
                 if not recycle_name:
@@ -469,6 +544,68 @@ async def on_message(message):
                 url = 'https://battlemetrics.com' + link
                 await message.channel.send(
                     serv_name + ' currently has ' + server_pop(url) + ' players online')
+
+    # Output skin data from the MySQL server for a given item
+    elif message.content.lower().startswith('!skindata'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, the user did not enter a server argument
+        if len(args) == 1:
+            # Search the specific servers we frequent
+            await message.channel.send(
+                'This command will display price data for a specific skin. Use **!skindata [skinname]**\n'
+                'All skin prices/dates are estimates, especially for skins released a long time ago')
+        # If there is a server argument, add any arguments after !serverpop to the server name
+        else:
+            # If the user entered an item name, ensure it is all in one string and search for it in the database
+            skin_name = ' '.join(args[1:])
+            # Open a text file containing a list of all rust item names and find the best match
+            with open('C:/Users/Stefon/PycharmProjects/CamBot/skins.txt') as file:
+                skin_name_list = file.read().splitlines()
+                file.close()
+            best_skin = get_string_best_match(skin_name_list, skin_name)
+
+            # Once we get the best matching item string, query the item's data from the SQL server. I originally
+            # queried data matching the search term using the %like% keyword and then used best_match to get the
+            # best item from the query's results. However, this often led to searches that didn't return any items
+            # which is not what I wanted. So I decided to reverse them at the cost of performance
+            sql = "SELECT * FROM skin WHERE skin_name = \"" + best_skin + "\""
+            cursor.execute(sql)
+            data = cursor.fetchall()[0]
+            # Theoretically, there should always be a match but if there isn't exit the command and let the user know
+            if not data:
+                await message.channel.send('No skin data found for the given skin. Use **!skindata [skinname]**\n')
+                return
+
+            # Once we have a best match, get the item's name url, initial price, and initial date
+            name = data[0]
+            skin_url = data[1]
+            skin_initial_price = data[2]
+            skin_initial_date = data[3]
+            # Rearrange the date format for US convenience
+            skin_initial_date = skin_initial_date.strftime("%m-%d-%Y")
+            # Get the current price and an image for the item
+            market = Market("USD")
+            current_price = market.get_lowest_price(name, AppID.RUST)
+            skin_html = get_html(skin_url)
+            # Attempt to get the percent change, and if we divide by 0 somehow, just set the percent to 0
+            try:
+                percent_change = "{:.2f}".format(((current_price - skin_initial_price) / skin_initial_price) * 100)
+            except ZeroDivisionError:
+                percent_change = 0
+
+            # Dipslay the data and an image for the given item
+            img_div = skin_html.find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+            embed = discord.Embed()
+            embed.add_field(name="Item name", value=name, inline=False)
+            embed.add_field(name="Release date", value=skin_initial_date, inline=False)
+            embed.add_field(name="Initial price", value='$' + str(skin_initial_price), inline=False)
+            embed.add_field(name="Current price", value='$' + str(current_price), inline=False)
+            embed.add_field(name="Percent change", value=str(percent_change) + '%', inline=False)
+            embed.add_field(name='Steam market link', value=skin_url, inline=False)
+            embed.set_image(url=img_div)
+            await message.channel.send('Displaying skin data for **' + name + '**', embed=embed)
+
 
 
     # Print out the latest news regarding Rust's future update
@@ -590,7 +727,7 @@ async def on_message(message):
     # Posts a random picture from a given folder
     elif message.content.lower().startswith('!campic'):
         img_path = 'C:/Users/Stefon/PycharmProjects/CamBot/Cam/'
-        pics=[]
+        pics = []
         # Get the filenames of all images in the directory
         for fileName in os.listdir(img_path):
             pics.append(fileName)
