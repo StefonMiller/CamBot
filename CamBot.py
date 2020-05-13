@@ -101,7 +101,6 @@ def craft_calc(search_term, num_crafts):
 
             return craft_string
 
-
 # Returns the best item in i_list matching term. Used for craftcalc and serverpop commands
 # @Param i_list: list of items that have the text attirbute for comparison
 # @Param term: search term entered
@@ -113,11 +112,14 @@ def get_best_match(i_list, term):
     best_item_match = None
     best_item_match_num = 0
     for i in i_list:
-        # Get an average of multiple fuzzywuzzy scorers to get a better match
+        # Get an average of multiple fuzzywuzzy scorers to get a better match. Note w is not averaged as its score
+        # Is the most valued out of the 5 scorers
         r = fuzz.ratio(term, i.text)
         s = fuzz.token_set_ratio(term, i.text)
         p = fuzz.partial_ratio(term, i.text)
-        temp_ratio = (r + s + p) / 3
+        w = fuzz.WRatio(term, i.text)
+        srt = fuzz.token_sort_ratio(term, i.text)
+        temp_ratio = (r + s + p + srt) / 4 + w
 
         if temp_ratio > best_item_match_num:
             best_item_match = i
@@ -255,25 +257,63 @@ def sulf_calc(sulfur):
                   '** C4 with **' + str(sulfur % c4_sulf) + '** sulfur left over'
     return sulf_string
 
+def recycle(search_term, num_items):
+    item_url = 'https://rustlabs.com/group=itemlist'
+    item_html = get_html(item_url)
+    # Get all item entries and use fuzzywuzzy to find the best match according to our list of search terms.
+    # Originally I had implemented a system in which I used re.compile to get all items with at least 1 search term to
+    # Reduce the amount of items returned, and then processed the resulting set against all search terms. However,
+    # this led to a lot of bugs and was really bad in general. This solution is far better than my original
+    item_list = item_html.find_all('span', {"class": "r-cell"})
+    item = get_best_match(item_list, search_term)
+    if item is None:
+        return 'Item not found'
+    else:
+        item_link = item.parent['href']
+        # Once we find the appropriate item, open its corresponding page and get the recycle data
+        total_link = 'https://rustlabs.com' + item_link + '#tab=recycle'
+        recycle_html = get_html(total_link)
+        recycle_name = recycle_html.find('h1').text
+        # Get all resource/component outputs from the recycle output and their respective drop chances
+        try:
+            recycle_output = recycle_html.find('div', {"data-name": "recycle"}).find('td', {"class": "no-padding"}).find_all('a')
+        except Exception as e:
+            return recycle_name + ' cannot be recycled'
+
+        print(recycle_name)
+        recycle_text = 'Displaying recycling output for ' + str(num_items) + ' **' + recycle_name + '**:\n'
+        for output in recycle_output:
+            recycle_name = output.find('img')['alt']
+            recycle_quantity = output.find('span').text
+            if recycle_quantity == '':
+                recycle_quantity = 1 * num_items
+                recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
+            elif '%' in recycle_quantity:
+                recycle_percent = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items //100
+                recycle_text += '\tYou should expect to get ' + str(recycle_percent) + ' ' + recycle_name + '(' + recycle_quantity + ' chance for each item)\n'
+            else:
+                recycle_quantity = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items
+                recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
+
+        return recycle_text
 
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
 
-
 @client.event
 # This function runs whenever someone joins or leaves a voice channel. I mainly made it for my personal discord server,
 # but it will work with any other server as long as they have a 'rust' voice channel and 'squaddies' text channel
 async def on_voice_state_update(member, before, after):
+
     # If the user left the server check if they left the rust channel
     if after.channel is None:
         if before.channel.name.lower() == 'rust':
             output_channel = ''
             # Get the output server, in this case it will be squaddies
-            for server in client.guilds:
-                for channel in server.channels:
-                    if channel.name.lower() == 'squaddies':
-                        output_channel = channel
+            for channel in member.guild.channels:
+                if channel.name.lower() == 'squaddies':
+                    output_channel = channel
             if output_channel == '':
                 pass
             # Print a leaving message
@@ -291,12 +331,16 @@ async def on_voice_state_update(member, before, after):
 
     # If the user didn't leave the server, check if they moved to the 'rust' channel
     elif after.channel.name.lower() == 'rust':
+        # If a user mute/unmutes this event will trigger. Check if the channels are the same and do nothing if they are
+        # Check if we are joining a channel from outside the server
+        if before.channel is not None:
+            if before.channel == after.channel:
+                return
         output_channel = ''
         # Get the output server, in this case it will be named squaddies
-        for server in client.guilds:
-            for channel in server.channels:
-                if channel.name.lower() == 'squaddies':
-                    output_channel = channel
+        for channel in member.guild.channels:
+            if channel.name.lower() == 'squaddies':
+                output_channel = channel
         # Print a join message
         if output_channel == '':
             pass
@@ -341,6 +385,39 @@ async def on_message(message):
         embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False)
         await message.channel.send('Here is a list of commands. Call them without arguments '
                                    'for more info:\n', embed=embed)
+
+    elif message.content.lower().startswith('!recycle'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, the user did not enter a server argument
+        if len(args) == 1:
+            await message.channel.send('This command will display the recycle output for a given item. Use '
+                                       '**!recycle [itemname] [itemquantity]**')
+        else:
+            recycle_name = []
+            for i in args:
+                # Omit the !recycle command and the item number from the item name
+                if i == args[0] or i == args[-1]:
+                    pass
+                else:
+                    recycle_name.append(i)
+            # Try to convert the last word in the command to an int to test if the user entered an amount
+            try:
+                # If the user entered an amount, check if it is a valid amount
+                args[-1] = int(args[-1])
+                if args[-1] <= 0:
+                    await message.channel.send('Please enter a valid number')
+                else:
+                    # If the user entered a valid amount, call craft_calc with the amount
+                    recycle_num = args[-1]
+                    await message.channel.send(recycle(' '.join(recycle_name), recycle_num))
+            # If the user didn't enter an amount, add the last word to the item name and call craft_calc with 1 as
+            # the amount
+            except Exception as e:
+                if not recycle_name:
+                    recycle_name.append(i)
+                await message.channel.send(recycle(' '.join(recycle_name), 1))
+
 
 
 
