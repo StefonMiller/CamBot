@@ -10,9 +10,10 @@ from requests import get
 from contextlib import closing
 from bs4 import BeautifulSoup
 import tweepy
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from fuzzywuzzy import fuzz
 import mysql.connector
+import asyncio
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -20,16 +21,6 @@ with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
     f.close()
 # Create client object for discord integration
 client = discord.Client()
-
-
-# Returns the player count of a certain server URL on Battlemetrics.com
-# @Param serv_url: - url of the server we want the player count of
-# @Return: - number of players on the server
-def server_pop(serv_url):
-    serv_html = get_html(serv_url)
-    pop = serv_html.find('dt', string='Player count').find_next_sibling('dd')
-    return pop.text
-
 
 # Connect to the MySQL server and get the item corresponding to the best_skin found above
 with open('C:/Users/Stefon/PycharmProjects/CamBot/serverinfo.txt') as f:
@@ -50,11 +41,161 @@ try:
 except Exception as e:
     pass
 
+# Background task used to check for website changes
+async def check():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        print('Checking for site changes...')
+        # Get the first skin in the rust item store to check for changes
+        items, total_item_price = get_rust_items('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+        item_name = next(iter(items))
 
-# Gets all items in the rust item store and stores them in the skin database
-# TODO Implement this
-def insert_items():
-    pass
+        # Get the title of the newest article on rustafied to check for changes
+        news_title, news_desc = get_news('https://rustafied.com')
+
+        # Get the title of the newest devblog to check for updates
+        devblog_title, devblog_url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
+
+        # Check if any of the corresponding text files were updated
+        item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', item_name)
+        news_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_news.txt', news_title)
+        devblog_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_devblog.txt', devblog_title)
+
+        # If any of the files were updated, get the channels to post in. This avoids finding all appropriate channels when
+        # we don't need to
+        if item_status == 1 or news_status == 1 or devblog_status == 1:
+
+            # Loop through all servers Cambot is connected to. For each server get the first text channel to post the
+            # update(s) to. However, if there is a text channel called 'Squaddies' then use that instead
+            channel_list = []
+            for guild in client.guilds:
+                first_channel = None
+                for channel in guild.channels:
+                    if guild.name.lower() == "toon's hotbox":
+                        pass
+                    elif not first_channel:
+                        first_channel = channel
+                    elif channel.name.lower() == 'squaddies':
+                        first_channel = channel
+                    else:
+                        pass
+                if first_channel:
+                    channel_list.append(first_channel)
+
+            if item_status == 1:
+                await update_items(channel_list, items, total_item_price)
+            if news_status == 1:
+                await post_rust_news_update(channel_list, news_title, news_desc)
+            if devblog_status == 1:
+                await post_devblog_update(channel_list, devblog_title, devblog_url, desc)
+        else:
+            print('No changes found...')
+            pass
+        await asyncio.sleep(900)
+
+# Returns the player count of a certain server URL on Battlemetrics.com
+# @Param serv_url: - url of the server we want the player count of
+# @Return: - number of players on the server
+def server_pop(serv_url):
+    serv_html = get_html(serv_url)
+    pop = serv_html.find('dt', string='Player count').find_next_sibling('dd')
+    return pop.text
+
+# Inserts all current items from the rust store into the MySQL server and the local text file of item names
+def insert_items(items):
+    # Get current date
+    today = date.today()
+    # For each item in the dictionary, convert the name to a steam market url and insert the item's data into
+    # the MySQL server
+    for item in items:
+        currItemHTTP = item.replace(' ', '%20')
+        currItemHTTP = currItemHTTP.replace('&', '%26')
+        item_url = 'https://steamcommunity.com/market/listings/' + '252490' + '/' + currItemHTTP
+        item_price = float(items[item][1:])
+        try:
+            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date) VALUES(%s, %s, %s, %s)"
+            val = (item, item_url, item_price, today)
+            cursor.execute(sql, val)
+            connection.commit()
+            print('Successfully inserted ' + item)
+            # Once we insert the items, we know it is not a duplicate entry and can insert the name into our text file
+            # containing all skin names
+            with open('C:/Users/Stefon/PycharmProjects/CamBot/skins.txt', "a") as file:
+                file.write(item + '\n')
+                print('Added ' + item + ' to text file')
+        except Exception as e:
+            print('Duplicate entry, skipping ' + item + '...')
+
+
+# Announces the rust item store has updated, displays all item data, and then calls insert_items
+# @Param channels: List of channels to post the announcment to
+# @Param items: all items currently in the store
+# @Param total_price: Total price of all items
+async def update_items(channels, items, total_price):
+    total_item_price = '$' + str("{:.2f}".format(total_price))
+    # If the dictionary is empty, then the item store is having an error or is updating
+    if not bool(items):
+        pass
+    # If we have entries, format and display them
+    else:
+        embed = discord.Embed()
+        # Format the strings for display in an embed
+        for item in items:
+            item_text = '**' + item + '**'
+            embed.add_field(name='**' + item_text + '**', value=items[item], inline=False)
+        embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
+        item_str = 'The Rust item store has updated with new items: ' \
+                   + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
+        for channel in channels:
+            await channel.send(item_str, embed=embed)
+    insert_items(items)
+
+
+# Make a post in channel announcing the new devblog
+# @Param channels: List of channels to post the announcement to
+# @Param title: Title of devblog
+# @Param url: URL of devblog
+# @Param desc: description of devblog
+async def post_devblog_update(channels, title, url, desc):
+    embed = discord.Embed(title=title, url=url, description=desc)
+    for channel in channels:
+        await channel.send('A new Rust devblog has been uploaded:', embed=embed)
+
+
+# Make a post in channel announcing the new rust news on Rustafied
+# @Param channels: List of channels to post the announcement to
+# @Param title: Title of news article
+# @Param desc: Description of news article
+async def post_rust_news_update(channels, title, desc):
+    embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
+    for channel in channels:
+        await channel.send('Rustafied has published a new news article', embed=embed)
+
+
+# Check a website for changes
+# @Param current_path: Path to text file containing data taken from most recent update check
+# @Param current_data: Data pulled from the website at the time of calling the method
+# @Return 1 or 0 depending on if the file needs updated
+def check_for_updates(current_path, current_data):
+    # Open the text file and get the most recent data
+    with open(current_path) as f:
+        check_name = f.read().splitlines()
+        f.close()
+    # If there is no data in the text file it needs to be updated
+    if not check_name:
+        with open(current_path, 'w') as f:
+            f.write(current_data)
+            f.close()
+        return 1
+    # If the names match, then the list is up to date
+    elif check_name[0] == current_data:
+        return 0
+    # If the names do not match, then the file needs to be updated
+    else:
+        with open(current_path, 'w') as f:
+            f.write(current_data)
+            f.close()
+        return 1
 
 
 # Gets the status of all servers the CamBot is dependent on
@@ -587,6 +728,14 @@ async def on_message(message):
             # Get the current price and an image for the item
             market = Market("USD")
             current_price = market.get_lowest_price(name, AppID.RUST)
+            # Some skins may be added to the database before they are able to be listed due to steam's trading cooldown.
+            # In this case there will be no current price and thus we should tell the user to wait for the item to be
+            # able to be listed
+            if not current_price:
+                await message.channel.send(name + ' has no market price data at the moment. This probably means '
+                                                  'the skin came out this week and cannot be placed on the market'
+                                                  ' at this time.')
+                return
             skin_html = get_html(skin_url)
             # Attempt to get the percent change, and if we divide by 0 somehow, just set the percent to 0
             try:
@@ -934,8 +1083,7 @@ async def on_message(message):
 
     # Displays the current list of rust items for sale, along with their prices
     elif message.content.lower().startswith('!rustitems'):
-        store_url = 'https://store.steampowered.com/itemstore/252490/browse/?filter=All'
-        items, total_item_price = get_rust_items(store_url)
+        items, total_item_price = get_rust_items('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
         total_item_price = '$' + str("{:.2f}".format(total_item_price))
         # If the dictionary is empty, then the item store is having an error or is updating
         if not bool(items):
@@ -943,13 +1091,12 @@ async def on_message(message):
         # If we have entries, format and display them
         else:
             embed = discord.Embed()
-            # Format the strings for display, this is about the best it gets at the moment as discord does
-            # not provide text formatting. So the string looks perfect in console but is off in the chat message
+            # Format the strings for display in an embed
             for item in items:
                 item_text = '**' + item + '**'
                 embed.add_field(name='**' + item_text + '**', value=items[item], inline=False)
             embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
-            item_str = 'Item store: ' + store_url + '\n\n'
+            item_str = 'Item store: ' + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
             await message.channel.send(item_str, embed=embed)
 
 
@@ -995,5 +1142,5 @@ async def on_message(message):
     elif message.content.lower().startswith('!status'):
         await message.channel.send(get_status())
 
-
+client.loop.create_task(check())
 client.run(keys[0])
