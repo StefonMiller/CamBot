@@ -595,6 +595,8 @@ async def on_message(message):
         embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False),
         embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=False),
         embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=False)
+        embed.add_field(name="**!stats**", value="Displays the stats of a given item(weapon, armor, etc)", inline=False)
+        embed.add_field(name="**!repair**", value="Displays the repair cost for a given item", inline=False)
         await message.channel.send('Here is a list of commands. Call them without arguments '
                                    'for more info:\n', embed=embed)
 
@@ -1002,6 +1004,7 @@ async def on_message(message):
 
             await message.channel.send(table_text)
 
+    # Displays all stats pertaining to the item the user searches for
     elif message.content.lower().startswith('!stats'):
         args = message.content.lower().split()
         # Print out a command description if the user doesn't enter an item name
@@ -1013,10 +1016,13 @@ async def on_message(message):
         else:
             best_item = get_item(' '.join(args[1:]))
             item_url = 'https://www.rustlabs.com' + best_item['href']
+            # Get the stats table from the corresponding item's info page
             stats_html = get_html(item_url)
             stats_table = stats_html.find('table', {"class": "info-table"})
+            # If the html returned is null, then there are no stats for the item
             if stats_table is None:
                 await message.channel.send('There are no stats for ' + best_item.text)
+            # If the item has stats, then output all rows into an embed to display to the user
             else:
                 rows = stats_table.find_all('tr')
                 embed = discord.Embed()
@@ -1024,6 +1030,46 @@ async def on_message(message):
                     data = row.find_all('td')
                     embed.add_field(name=data[0].text, value=data[1].text, inline=True)
                 await message.channel.send('Displaying item stats for **' + best_item.text + '**:', embed=embed)
+
+    elif message.content.lower().startswith('!repair'):
+        args = message.content.lower().split()
+        # Print out a command description if the user doesn't enter an item name
+        if len(args) == 1:
+            await message.channel.send('This command will display the repair cost for a given item. Use **!repair'
+                                       ' [itemName]**')
+        # If the user enters an item, search for it. Get a list of all items and find the one matching the user's
+        # search term(s)
+        else:
+            best_item = get_item(' '.join(args[1:]))
+            print(best_item.text)
+            item_url = 'https://www.rustlabs.com' + best_item['href'] + '#tab=repair'
+            # Get the stats table from the corresponding item's info page
+            repair_html = get_html(item_url)
+            # Get the repair data and output it as an embed. If there is an error when getting the data, then
+            # there is no repair data for the given item
+            try:
+                repair_table = repair_html.find('div', {"data-name": "repair"})
+                repair_table_body = repair_table.find('tbody')
+                # Get the materials, condition loss, and bool pertaining to if a blueprint is required to repair for
+                # the item
+                row = repair_table_body.find('tr')
+                cols = row.find_all('td')
+                embed = discord.Embed()
+                materials = cols[2].find_all('img')
+                for material in materials:
+                    material_name = material['alt']
+                    quantity = material.find_next_sibling().text[1:]
+                    # If the quantity is empty, then there is only 1 of that material required
+                    if quantity == '':
+                        quantity = 1
+                    embed.add_field(name=material_name, value=quantity, inline=False)
+                embed.add_field(name="Condition Loss", value=cols[3].text, inline=False)
+                embed.add_field(name="Blueprint required?", value=cols[4].text, inline=False)
+            except Exception as e:
+                await message.channel.send(best_item.text + ' has no repair data. Use **!repair [itemName]**')
+                return
+            # Output the item's repair data as an embed
+            await message.channel.send('Displaying repair cost for **' + best_item.text + '**:', embed=embed)
 
     # Outputs the most efficient furnace ratios for a specific furnace and ore type
     elif message.content.lower().startswith('!furnaceratios'):
