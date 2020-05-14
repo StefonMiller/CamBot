@@ -71,9 +71,7 @@ async def check():
             for guild in client.guilds:
                 first_channel = None
                 for channel in guild.channels:
-                    if guild.name.lower() == "toon's hotbox":
-                        pass
-                    elif not first_channel:
+                    if not first_channel:
                         first_channel = channel
                     elif channel.name.lower() == 'squaddies':
                         first_channel = channel
@@ -1004,6 +1002,29 @@ async def on_message(message):
 
             await message.channel.send(table_text)
 
+    elif message.content.lower().startswith('!stats'):
+        args = message.content.lower().split()
+        # Print out a command description if the user doesn't enter an item name
+        if len(args) == 1:
+            await message.channel.send('This command will display all stats corresponding to a given item. Use **!stats'
+                                       ' [itemName]**')
+        # If the user enters an item, search for it. Get a list of all items and find the one matching the user's
+        # search term(s)
+        else:
+            best_item = get_item(' '.join(args[1:]))
+            item_url = 'https://www.rustlabs.com' + best_item['href']
+            stats_html = get_html(item_url)
+            stats_table = stats_html.find('table', {"class": "info-table"})
+            if stats_table is None:
+                await message.channel.send('There are no stats for ' + best_item.text)
+            else:
+                rows = stats_table.find_all('tr')
+                embed = discord.Embed()
+                for row in rows:
+                    data = row.find_all('td')
+                    embed.add_field(name=data[0].text, value=data[1].text, inline=True)
+                await message.channel.send('Displaying item stats for **' + best_item.text + '**:', embed=embed)
+
     # Outputs the most efficient furnace ratios for a specific furnace and ore type
     elif message.content.lower().startswith('!furnaceratios'):
         args = message.content.lower().split()
@@ -1142,5 +1163,5 @@ async def on_message(message):
     elif message.content.lower().startswith('!status'):
         await message.channel.send(get_status())
 
-client.loop.create_task(check())
+#client.loop.create_task(check())
 client.run(keys[0])
