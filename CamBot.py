@@ -14,6 +14,7 @@ from datetime import datetime, date, timedelta
 from fuzzywuzzy import fuzz
 import mysql.connector
 import asyncio
+import string
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -41,6 +42,7 @@ try:
 except Exception as e:
     pass
 
+
 # Background task used to check for website changes
 async def check():
     await client.wait_until_ready()
@@ -61,8 +63,8 @@ async def check():
         news_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_news.txt', news_title)
         devblog_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_devblog.txt', devblog_title)
 
-        # If any of the files were updated, get the channels to post in. This avoids finding all appropriate channels when
-        # we don't need to
+        # If any of the files were updated, get the channels to post in. This avoids finding all appropriate channels
+        # when we don't need to
         if item_status == 1 or news_status == 1 or devblog_status == 1:
 
             # Loop through all servers Cambot is connected to. For each server get the first text channel to post the
@@ -82,22 +84,27 @@ async def check():
 
             if item_status == 1:
                 await update_items(channel_list, items, total_item_price)
+                print('Posted item store update')
             if news_status == 1:
                 await post_rust_news_update(channel_list, news_title, news_desc)
+                print('Posted Rustafied news update')
             if devblog_status == 1:
                 await post_devblog_update(channel_list, devblog_title, devblog_url, desc)
+                print('Posted devblog update')
         else:
             print('No changes found...')
             pass
         await asyncio.sleep(900)
 
+
 # Returns the player count of a certain server URL on Battlemetrics.com
-# @Param serv_url: - url of the server we want the player count of
+# @Param server_url: - url of the server we want the player count of
 # @Return: - number of players on the server
-def server_pop(serv_url):
-    serv_html = get_html(serv_url)
-    pop = serv_html.find('dt', string='Player count').find_next_sibling('dd')
+def server_pop(server_url):
+    server_html = get_html(server_url)
+    pop = server_html.find('dt', string='Player count').find_next_sibling('dd')
     return pop.text
+
 
 # Inserts all current items from the rust store into the MySQL server and the local text file of item names
 def insert_items(items):
@@ -106,9 +113,9 @@ def insert_items(items):
     # For each item in the dictionary, convert the name to a steam market url and insert the item's data into
     # the MySQL server
     for item in items:
-        currItemHTTP = item.replace(' ', '%20')
-        currItemHTTP = currItemHTTP.replace('&', '%26')
-        item_url = 'https://steamcommunity.com/market/listings/' + '252490' + '/' + currItemHTTP
+        item_http = item.replace(' ', '%20')
+        item_http = item_http.replace('&', '%26')
+        item_url = 'https://steamcommunity.com/market/listings/' + '252490' + '/' + item_http
         item_price = float(items[item][1:])
         try:
             sql = "INSERT INTO skin (skin_name, link, initial_price, release_date) VALUES(%s, %s, %s, %s)"
@@ -124,9 +131,11 @@ def insert_items(items):
         except Exception as e:
             print('Duplicate entry, skipping ' + item + '...')
 
+    return
+
 
 # Announces the rust item store has updated, displays all item data, and then calls insert_items
-# @Param channels: List of channels to post the announcment to
+# @Param channels: List of channels to post the announcement to
 # @Param items: all items currently in the store
 # @Param total_price: Total price of all items
 async def update_items(channels, items, total_price):
@@ -147,6 +156,7 @@ async def update_items(channels, items, total_price):
         for channel in channels:
             await channel.send(item_str, embed=embed)
     insert_items(items)
+    return
 
 
 # Make a post in channel announcing the new devblog
@@ -158,6 +168,7 @@ async def post_devblog_update(channels, title, url, desc):
     embed = discord.Embed(title=title, url=url, description=desc)
     for channel in channels:
         await channel.send('A new Rust devblog has been uploaded:', embed=embed)
+    return
 
 
 # Make a post in channel announcing the new rust news on Rustafied
@@ -168,6 +179,7 @@ async def post_rust_news_update(channels, title, desc):
     embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
     for channel in channels:
         await channel.send('Rustafied has published a new news article', embed=embed)
+    return
 
 
 # Check a website for changes
@@ -176,9 +188,9 @@ async def post_rust_news_update(channels, title, desc):
 # @Return 1 or 0 depending on if the file needs updated
 def check_for_updates(current_path, current_data):
     # Open the text file and get the most recent data
-    with open(current_path) as f:
-        check_name = f.read().splitlines()
-        f.close()
+    with open(current_path) as file:
+        check_name = file.read().splitlines()
+        file.close()
     # If there is no data in the text file it needs to be updated
     if not check_name:
         with open(current_path, 'w') as f:
@@ -201,8 +213,8 @@ def check_for_updates(current_path, current_data):
 def get_status():
     # Attempt connection to each dependent server and if the status is not 200, return false
     import requests
-    servers = [requests.head('https://www.battlemetrics.com/'), requests.head('https://rust.facepunch.com/blog/')
-        , requests.head('https://www.rustlabs.com/'), requests.head('https://rustafied.com/')]
+    servers = [requests.head('https://www.battlemetrics.com/'), requests.head('https://rust.facepunch.com/blog/'),
+               requests.head('https://www.rustlabs.com/'), requests.head('https://rustafied.com/')]
 
     for server in servers:
         if server.status_code == 200 or 301:
@@ -595,10 +607,62 @@ async def on_message(message):
         embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False),
         embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=False),
         embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=False)
-        embed.add_field(name="**!stats**", value="Displays the stats of a given item(weapon, armor, etc)", inline=False)
-        embed.add_field(name="**!repair**", value="Displays the repair cost for a given item", inline=False)
-        await message.channel.send('Here is a list of commands. Call them without arguments '
-                                   'for more info:\n', embed=embed)
+        embed.add_field(name="**!stats**", value="Outputs the stats of a given item(weapon, armor, etc)", inline=False)
+        embed.add_field(name="**!repair**", value="Outputs the cost to repair an item", inline=False)
+        embed.add_field(name="**!binds**", value="Displays all supported commands to bind", inline=False)
+        embed.add_field(name="**!gamble**", value="Displays bandit camp wheel percentages and calculates the "
+                                                  "chance of a certain outcome occuring", inline=False)
+        await message.channel.send('Here is a list of commands. For more info on a specific command, use '
+                                   '**![commandName]**\n', embed=embed)
+
+    # Displays bandit camp wheel percentages and the chance of a certain event happening
+    elif message.content.lower().startswith('!gamble'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
+        if len(args) == 1:
+            outcome_text = "```1\t\t\t\t48%\n" \
+                           "3\t\t\t\t24%\n" \
+                           "5\t\t\t\t16%\n" \
+                           "10\t\t\t\t8%\n" \
+                           "20\t\t\t\t4%```"
+            await message.channel.send('Displaying the percentages of hitting each number on the bandit camp wheel. '
+                                       'Use **!gamble [num],[num],[num],etc** to get the chance for a series of '
+                                       'outcomes to occur\n' + outcome_text)
+        # If the user entered arguments, get the odds of that string of outcomes occuring
+        else:
+            # Hardcoded percentages for the wheel
+            percentages = {
+                1: .48,
+                3: .24,
+                5: .16,
+                10: .08,
+                20: .04
+            }
+            # Get all arguments but the command into a new string. This is in case the user did not enter uniform
+            # spacing in their list of outcomes
+            outcomes = "".join(args[1:])
+            # Split all outcomes into a list
+            outcomes_list = outcomes.split(',')
+            percentage = 1
+            # For each outcome entered, convert the item to a number and try to look it up in the dictionary
+            for outcome in outcomes_list:
+                # If we can't convert the number to an int, the user didn't enter the outcomes correctly
+                try:
+                    outcome = int(outcome)
+                except Exception as e:
+                    await message.channel.send('You did not enter a number. Use something like **!gamble 1,1,1,1**')
+                    return
+                # If the item doesn't exist in the dictionary, then the user entered something wrong
+                try:
+                    # If we do get the dictionary value, multiply it by our current percent chance to get the new chance
+                    percentage = percentage * percentages[outcome]
+                except KeyError as k:
+                    await message.channel.send("You did not enter a valid wheel number. Enter 1, 3, 5, 10, or 20")
+                    return
+
+            await message.channel.send('The chance of the wheel landing on ' + str(outcomes_list) + ' is **' +
+                                       "{:.2f}".format(percentage * 100) + '%**')
 
     # Outputs recycle data for a given item and item quantity
     elif message.content.lower().startswith('!recycle'):
@@ -634,9 +698,6 @@ async def on_message(message):
                     recycle_name.append(i)
                 await message.channel.send(recycle(' '.join(recycle_name), 1))
 
-
-
-
     # Checks pop of frequented servers if no server argument, and searches for a specific server if specified
     elif message.content.lower().startswith('!serverpop'):
         # Split the input command into a list
@@ -648,8 +709,9 @@ async def on_message(message):
                 'https://www.battlemetrics.com/servers/rust/2634280') + ' players online\n'
                                                                         'Bloo Lagoon currently has ' + server_pop(
                 'https://www.battlemetrics.com/servers/rust/3461363') + ' players online\n\n'
-                                                                        'For specific server pop, use **!serverpop [servername]**')
-        # If there is a server argument, add any arguments after !serverpop to the server name
+                                                                        'For specific server pop, use **!serverpop ['
+                                                                        'servername]**')
+            # If there is a server argument, add any arguments after !serverpop to the server name
         else:
             serv_name = ""
             for i in args:
@@ -685,6 +747,91 @@ async def on_message(message):
                 url = 'https://battlemetrics.com' + link
                 await message.channel.send(
                     serv_name + ' currently has ' + server_pop(url) + ' players online')
+
+    elif message.content.lower().startswith('!binds'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is output a command description
+        if len(args) == 1:
+            embed = discord.Embed()
+            embed.add_field(name="**!binds commands**", value="Displays all commands you can bind to a key"
+                            , inline=False)
+            embed.add_field(name="**!binds keys**", value="Displays all keys you can bind commands to", inline=False)
+            embed.add_field(name="**!binds gestures**", value="Displays all gestures you can bind", inline=False)
+            embed.add_field(name="**!binds popular**", value="Displays popular binds", inline=False)
+            await message.channel.send("Use any of the below commands for information on various rust binds",
+                                       embed=embed)
+        # If there is a server argument, check if they entered 'keys' 'gestures' or 'commands'
+        else:
+            # Displays all console commands you can use
+            if args[1].lower() == 'commands':
+                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
+                # the next is the embed value
+                with open('C:/Users/Stefon/PycharmProjects/CamBot/bind_commands.txt') as file:
+                    key_list = file.read().splitlines()
+                    file.close()
+                # Create embed for output
+                embed = discord.Embed()
+                # Get the first line and input it in the title, then put its subsequent line in the value of the embed
+                start = 0
+                for key in key_list:
+                    if start % 2 == 0:
+                        embed.add_field(name=key, value=key_list[start + 1], inline=False)
+                    start += 1
+                await message.channel.send(
+                    'Displaying all commands you can bind in console. You can bind multiple commands to a key by '
+                    'seperating them with a ;. Additionally, adding a + before a command will only activate it '
+                    'while the key is held down', embed=embed)
+            # Displays all keys currently bindable in Rust
+            elif args[1].lower() == 'keys':
+                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
+                # the next is the embed value
+                with open('C:/Users/Stefon/PycharmProjects/CamBot/bind_keys.txt') as file:
+                    key_list = file.read().splitlines()
+                    file.close()
+                # Create embed for output
+                embed = discord.Embed()
+                # Get the first line and input it in the title, then put its subsequent line in the value of the embed
+                start = 0
+                for key in key_list:
+                    if start % 2 == 0:
+                        embed.add_field(name=key, value=key_list[start+1], inline=False)
+                    start += 1
+                await message.channel.send("Displaying all supported keys you can bind commands to. In Rust console, "
+                                           "enter **bind [key] [command]**\n",  embed=embed)
+            elif args[1].lower() == 'gestures':
+                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
+                # the next is the embed value
+                with open('C:/Users/Stefon/PycharmProjects/CamBot/bind_gestures.txt') as file:
+                    key_list = file.read().splitlines()
+                    file.close()
+                # Create embed for output
+                embed = discord.Embed()
+                gestures_text = "```"
+                for key in key_list:
+                    gestures_text += key + '\n'
+                gestures_text += '```'
+                await message.channel.send("Displaying all gestures. In Rust console, enter **bind [key] \" gesture"
+                                           " [gestureName]\"** Make sure you include the quotes!\n" + gestures_text)
+            elif args[1].lower() == 'popular':
+                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
+                # the next is the embed value
+                with open('C:/Users/Stefon/PycharmProjects/CamBot/binds_popular.txt') as file:
+                    key_list = file.read().splitlines()
+                    file.close()
+                # Create embed for output
+                embed = discord.Embed()
+                # Get the first line and input it in the title, then put its subsequent line in the value of the embed
+                start = 0
+                for key in key_list:
+                    if start % 2 == 0:
+                        embed.add_field(name=key, value=key_list[start + 1], inline=False)
+                    start += 1
+                await message.channel.send(
+                    'Displaying the most popular binds', embed=embed)
+            else:
+                await message.channel.send('You did not enter a valid command. Use **!binds keys, gestures, '
+                                           'commands, or popular**')
 
     # Output skin data from the MySQL server for a given item
     elif message.content.lower().startswith('!skindata'):
@@ -1041,7 +1188,6 @@ async def on_message(message):
         # search term(s)
         else:
             best_item = get_item(' '.join(args[1:]))
-            print(best_item.text)
             item_url = 'https://www.rustlabs.com' + best_item['href'] + '#tab=repair'
             # Get the stats table from the corresponding item's info page
             repair_html = get_html(item_url)
@@ -1209,5 +1355,6 @@ async def on_message(message):
     elif message.content.lower().startswith('!status'):
         await message.channel.send(get_status())
 
-#client.loop.create_task(check())
+
+client.loop.create_task(check())
 client.run(keys[0])
