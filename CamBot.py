@@ -16,7 +16,31 @@ from datetime import datetime, date, timedelta
 from fuzzywuzzy import fuzz
 import mysql.connector
 import asyncio
-import time
+import pyotp
+
+class PriceSkin:
+    def __init__(self, name, link, init_price, release_date, curr_price):
+        self.n = name
+        self.l = link
+        self.ip = init_price
+        self.rd = release_date
+        self.cp = curr_price
+        self.pc = "{:.2f}".format(((float(self.cp) - self.ip) / self.ip) * 100)
+
+    def get_name(self):
+        return self.n
+
+    def get_link(self):
+        return self.l
+
+    def get_init_price(self):
+        return self.ip
+
+    def get_release_date(self):
+        return self.rd
+
+    def get_curr_price(self):
+        return self.cp
 
 class Skin:
     def __init__(self, name, price, type):
@@ -360,6 +384,23 @@ def get_string_best_match(str_list, search_term):
             pass
     return best_item_match
 
+# Gets all skin data using Bitskins API
+def get_skin_prices():
+    with open('C:/Users/Stefon/PycharmProjects/CamBot/bitskins_keys.txt') as f:
+        lines = f.read().splitlines()
+        f.close()
+    api_key = lines[0]
+    secret = lines[1]
+    my_secret = secret
+    my_token = pyotp.TOTP(my_secret)
+    r = requests.get(
+        'https://bitskins.com/api/v1/get_all_item_prices/?api_key=' + api_key + '&code=' + my_token.now() + '&app_id=252490')
+    data = r.json()
+    item_names = data['prices']
+    item_dict = {}
+    for name in item_names:
+        item_dict[name['market_hash_name']] = name['price']
+    return item_dict
 
 # Tweets a dynamic tweet, depending on the specified image/text
 # @Param msg: Text to tweet
@@ -473,6 +514,16 @@ def get_html(url):
         else:
             return ''
 
+# Gets all skins of a certain type
+def get_skins_of_type(type):
+    with open('C:/Users/Stefon/PycharmProjects/CamBot/skin_types.txt') as file:
+        skin_type_list = file.read().splitlines()
+        file.close()
+    best_skin = get_string_best_match(skin_type_list, type)
+    sql = "SELECT skin_name, link, initial_price, release_date FROM skin WHERE skin_type = \"" + best_skin + "\""
+    cursor.execute(sql)
+    data = cursor.fetchall()
+    return data, best_skin
 
 # For an input amount of sulfur, display how many rockets, c4, etc you can craft
 # @Param sulfur: How much sulfur the user has
@@ -490,6 +541,40 @@ def sulf_calc(sulfur):
                   '** C4 with **' + str(sulfur % c4_sulf) + '** sulfur left over'
     return sulf_string
 
+
+# Cross references skins of a certain type with a master list of skins and their current prices retrieved from
+# Bitskins API. This is used to get all skins of skin_type and their current prices, which will then be sorted
+# to display aggregate data on said skins
+def cross_reference_skins(skin_type = ''):
+    if skin_type == '':
+        sql = "SELECT skin_name, link, initial_price, release_date FROM skin"
+        cursor.execute(sql)
+        data = cursor.fetchall()
+        skin_price_list = get_skin_prices()
+        cross_referenced_skin_list = []
+        for skin in data:
+            # Attempt to add a skin to the list. If there is a key error, then the skin was added this week and has
+            # no market data. Thus, we can skip it.
+            try:
+                cross_referenced_skin_list.append(PriceSkin(skin[0], skin[1], skin[2], skin[3], skin_price_list[skin[0]]))
+            except KeyError as e:
+                pass
+        return cross_referenced_skin_list
+    else:
+        # Get all skins of skin_type from the database
+        skin_list, best_skin = get_skins_of_type(skin_type)
+        # Get all skins and their prices from Bitskins API
+        skin_price_list = get_skin_prices()
+        # List of PriceSkin Objects. Each object is a skin for item skin_type
+        cross_referenced_skin_list = []
+        for skin in skin_list:
+            # Attempt to add a skin to the list. If there is a key error, then the skin was added this week and has
+            # no market data. Thus, we can skip it.
+            try:
+                cross_referenced_skin_list.append(PriceSkin(skin[0], skin[1], skin[2], skin[3], skin_price_list[skin[0]]))
+            except KeyError as e:
+                pass
+        return cross_referenced_skin_list, best_skin
 
 # Return the recycle output for a given item
 # @Param search_term item user is searching for
@@ -648,32 +733,190 @@ async def on_message(message):
         args = message.content.lower().split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
-            await message.channel.send('This command displays all skins for a certain item. '
-                                       'Use **!skinlist [itemType]**')
+            await message.channel.send('This command displays aggregate skin data. Use **!skindata -c, -e, -lp, or '
+                                       '-mp [itemType]** for the top 10 cheapest, most expensive, least profitable, or'
+                                       ' most profitable skins for that item. Additionally, you can use these without '
+                                       'any item type for the top 10 cheapest/etc skins for all items\n '
+                                       'Use **!skinlist [itemType]** to display *all* skins of that item type'
+                                       '(this list may be long!)')
         # If the user entered arguments, get the arguments to determine what to do
+        elif args[1] == '-c':
+            search_type = ' '.join(args[2:])
+            # If there are no arguments after -c, then display the cheapest skins of all categories
+            if search_type == '':
+                # Get all items names and their prices from Bitskins API
+                skin_price_list = get_skin_prices()
+                # Sort the returned dictionary by price and take the 10 lowest values
+                sorted_by_price = {k: v for k, v in sorted(skin_price_list.items(), key=lambda ite: float(ite[1]))[:10]}
+                await message.channel.send('Displaying the 10 cheapest skins on the market:')
+                desc = ''
+                # Get the link for each item and output it in an embed
+                for s in sorted_by_price:
+                    sql = "SELECT link FROM skin WHERE skin_name = %s"
+                    val = (s,)
+                    cursor.execute(sql, val)
+                    link = cursor.fetchone()[0]
+                    if len(desc) + len('[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+            else:
+                # Get a list of objects containing all items of search_type
+                skin_list, best_skin = cross_reference_skins(search_type)
+                # Once we have a list of sorted objects, diplay the first 10. These will be the 10 cheapest skins for
+                # skin_type in this case
+                sorted_by_price = sorted(skin_list, key=lambda x: float(x.cp))[:10]
+                await message.channel.send('Displaying the 10 cheapest skins for **' + best_skin + '**:')
+                desc = ''
+                for s in sorted_by_price:
+                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+        elif args[1] == '-e':
+            search_type = ' '.join(args[2:])
+            # If there are no arguments after -e, then display the cheapest skins of all categories
+            if search_type == '':
+                # Get item names and prices of all items using Bitskins API
+                skin_price_list = get_skin_prices()
+                # Sort the list by price and take the 10 highest values
+                sorted_by_price = {k: v for k, v in sorted(skin_price_list.items(), key=lambda ite: float(ite[1]),
+                                                           reverse=True)[:10]}
+                await message.channel.send('Displaying the 10 most expensive skins on the market:')
+                desc = ''
+                # Once we have the most expensive items, get their store URLs and display them in an embed
+                for s in sorted_by_price:
+                    sql = "SELECT link FROM skin WHERE skin_name = %s"
+                    val = (s,)
+                    cursor.execute(sql, val)
+                    link = cursor.fetchone()[0]
+                    if len(desc) + len('[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+            else:
+                skin_list, best_skin = cross_reference_skins(search_type)
+                # Once we have a list of sorted objects, diplay the first 10. These will be the 10 most expensive skins for
+                # skin_type in this case. This is pretty much the same as -c, except we reverse the sorting
+                sorted_by_price = sorted(skin_list, key=lambda x: float(x.cp), reverse=True)[:10]
+                await message.channel.send('Displaying the 10 most expensive skins for **' + best_skin + '**:')
+                desc = ''
+                for s in sorted_by_price:
+                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+        elif args[1] == '-lp':
+            search_type = ' '.join(args[2:])
+            # If there are no arguments after -lp, then display the least profitable of all categories
+            if search_type == '':
+                # Get a list of objects containing all items in rust. I cannot simply use the Bitskins API for this
+                # like with -c and -e since I need current price which can only be found in my database. Thus,
+                # I have to combine my database and Bitskins to get the %profit
+                skin_list = cross_reference_skins()
+                # Once we have the skins, sort them by percent profit and take the 10 lowest values
+                sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc))[:10]
+                await message.channel.send('Displaying the 10 skins with lowest returns on the market:')
+                desc = ''
+                # Display the results in an embed
+                for s in sorted_by_price:
+                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+            else:
+                skin_list, best_skin = cross_reference_skins(search_type)
+                # Once we have a list of sorted objects, diplay the first 10. These will be the 10 cheapest skins for
+                # skin_type in this case
+                sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc))[:10]
+                await message.channel.send('Displaying the 10 skins with lowest returns for **' + best_skin + '**:')
+                desc = ''
+                for s in sorted_by_price:
+                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+        elif args[1] == '-mp':
+            search_type = ' '.join(args[2:])
+            # If there are no arguments after -lp, then display the least profitable of all categories
+            if search_type == '':
+                # Get a list of objects containing all items in rust. I cannot simply use the Bitskins API for this
+                # like with -c and -e since I need current price which can only be found in my database. Thus,
+                # I have to combine my database and Bitskins to get the %profit
+                skin_list = cross_reference_skins()
+                # Once we have the list of skins, sort them by %profit and take the 10 highest values
+                sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc), reverse=True)[:10]
+                await message.channel.send('Displaying the 10 skins with highest returns on the market:')
+                desc = ''
+                # Display results in an embed
+                for s in sorted_by_price:
+                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+            else:
+                skin_list, best_skin = cross_reference_skins(' '.join(args[2:]))
+                # Once we have a list of sorted objects, diplay the first 10. These will be the 10 cheapest skins for
+                # skin_type in this case
+                sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc), reverse=True)[:10]
+                await message.channel.send('Displaying the 10 skins with highest returns for **' + best_skin + '**:')
+                desc = ''
+                for s in sorted_by_price:
+                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
         else:
             skin_type = ' '.join(args[1:])
-            with open('C:/Users/Stefon/PycharmProjects/CamBot/skin_types.txt') as file:
-                skin_type_list = file.read().splitlines()
-                file.close()
-            best_skin = get_string_best_match(skin_type_list, skin_type)
-            sql = "SELECT skin_name, link, initial_price, release_date FROM skin WHERE skin_type = \"" + best_skin + "\""
-            cursor.execute(sql)
-            data = cursor.fetchall()
+            data, best_skin = get_skins_of_type(skin_type)
             # Theoretically, there should always be a match but if there isn't exit the command and let the user know
             if not data:
                 await message.channel.send('No skin data found for the given skin. Use **!skindata [skinname]**\n')
                 return
             else:
                 desc = ''
+                # Once we have the data, display it in an embed. Since there will be potentially hundreds of skins,
+                # do not display one skin per line. Instead, separate them with |s.
                 await message.channel.send('Displaying all skins for **' + best_skin + '**:')
                 for d in data:
-                    if len(desc) + len('[' + d[0] + '](' + d[1] + ')\n') >= 2000:
+                    if len(desc) + len('[' + d[0] + '](' + d[1] + ') | ') >= 2000:
                         embed = discord.Embed(description=desc)
                         await message.channel.send(embed=embed)
                         desc = ""
                     else:
-                        desc += '[' + d[0] + '](' + d[1] + ')\n'
+                        desc += '[' + d[0] + '](' + d[1] + ') | '
                 embed = discord.Embed(description=desc)
                 await message.channel.send(embed=embed)
 
