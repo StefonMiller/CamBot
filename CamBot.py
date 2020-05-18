@@ -14,7 +14,21 @@ from datetime import datetime, date, timedelta
 from fuzzywuzzy import fuzz
 import mysql.connector
 import asyncio
-import string
+
+
+class Skin:
+    def __init__(self, name, price, type):
+        self.n = name
+        self.p = price
+        self.t = type
+
+    def get_name(self):
+        return self.n
+
+    def get_price(self):
+        return self.p
+    def get_type(self):
+        return self.t
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -51,7 +65,7 @@ async def check():
         # Get the first skin in the rust item store to check for changes
         items, total_item_price = get_rust_items('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
         item_name = next(iter(items))
-
+        i_name = item_name.get_name()
         # Get the title of the newest article on rustafied to check for changes
         news_title, news_desc = get_news('https://rustafied.com')
 
@@ -59,7 +73,7 @@ async def check():
         devblog_title, devblog_url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
 
         # Check if any of the corresponding text files were updated
-        item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', item_name)
+        item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', i_name)
         news_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_news.txt', news_title)
         devblog_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_devblog.txt', devblog_title)
 
@@ -113,23 +127,29 @@ def insert_items(items):
     # For each item in the dictionary, convert the name to a steam market url and insert the item's data into
     # the MySQL server
     for item in items:
-        item_http = item.replace(' ', '%20')
+        item_name = item.get_name()
+        item_price = item.get_price()
+        item_type_url = item.get_type()
+        item_http = item_name.replace(' ', '%20')
         item_http = item_http.replace('&', '%26')
+        item_http = item_http.replace('?', '%3F')
         item_url = 'https://steamcommunity.com/market/listings/' + '252490' + '/' + item_http
-        item_price = float(items[item][1:])
+        item_price = float(item_price[1:])
         try:
-            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date) VALUES(%s, %s, %s, %s)"
-            val = (item, item_url, item_price, today)
+            item_type_html = get_html(item_type_url)
+            item_type = item_type_html.find('span', {"style": "color: #ffdba5"}).text
+            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date) VALUES(%s, %s, %s, %s, %s)"
+            val = (item_name, item_url, item_price, today, item_type)
             cursor.execute(sql, val)
             connection.commit()
-            print('Successfully inserted ' + item)
+            print('Successfully inserted ' + item_name)
             # Once we insert the items, we know it is not a duplicate entry and can insert the name into our text file
             # containing all skin names
             with open('C:/Users/Stefon/PycharmProjects/CamBot/skins.txt', "a") as file:
                 file.write(item + '\n')
-                print('Added ' + item + ' to text file')
+                print('Added ' + item_name + ' to text file')
         except Exception as e:
-            print('Duplicate entry, skipping ' + item + '...')
+            print('Duplicate entry, skipping ' + item_name + '...')
 
     return
 
@@ -140,7 +160,7 @@ def insert_items(items):
 # @Param total_price: Total price of all items
 async def update_items(channels, items, total_price):
     total_item_price = '$' + str("{:.2f}".format(total_price))
-    # If the dictionary is empty, then the item store is having an error or is updating
+    # If the list is empty, then the item store is having an error or is updating
     if not bool(items):
         pass
     # If we have entries, format and display them
@@ -148,8 +168,10 @@ async def update_items(channels, items, total_price):
         embed = discord.Embed()
         # Format the strings for display in an embed
         for item in items:
-            item_text = '**' + item + '**'
-            embed.add_field(name='**' + item_text + '**', value=items[item], inline=False)
+            item_name = item.get_name()
+            item_price = item.get_price()
+            item_text = '**' + item_name + '**'
+            embed.add_field(name='**' + item_text + '**', value=item_price, inline=False)
         embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
         item_str = 'The Rust item store has updated with new items: ' \
                    + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
@@ -405,20 +427,21 @@ def get_news(news_url):
 def get_rust_items(item_url):
     item_html = get_html(item_url)
     item_divs = item_html.find_all('div', {"class": "item_def_grid_item"})
-    item_dict = {}
+    item_list = []
     total_price = 0
     for i in item_divs:
         # Get div containing item name and store its text attribute
         item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
         item_name = item_name_div.text
+        item_type = i.find('a')['href']
         # Get div containing item price and store its text attribute
         item_price_div = i.find('div', {"class": "item_def_price"})
         # Convert the price to a double for addition and store it in the total price var
         item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
         item_price_in_double = float(item_price[1:])
         total_price += item_price_in_double
-        item_dict[item_name] = item_price
-    return item_dict, total_price
+        item_list.append(Skin(item_name, item_price, item_type))
+    return item_list, total_price
 
 
 # Gets an item from the RustLabs item page with name closest matching item_name
@@ -870,6 +893,7 @@ async def on_message(message):
             skin_url = data[1]
             skin_initial_price = data[2]
             skin_initial_date = data[3]
+            skin_type = data[4]
             # Rearrange the date format for US convenience
             skin_initial_date = skin_initial_date.strftime("%m-%d-%Y")
             # Get the current price and an image for the item
@@ -898,6 +922,7 @@ async def on_message(message):
             embed.add_field(name="Initial price", value='$' + str(skin_initial_price), inline=False)
             embed.add_field(name="Current price", value='$' + str(current_price), inline=False)
             embed.add_field(name="Percent change", value=str(percent_change) + '%', inline=False)
+            embed.add_field(name='Skin for:', value=skin_type, inline=False)
             embed.add_field(name='Steam market link', value=skin_url, inline=False)
             embed.set_image(url=img_div)
             await message.channel.send('Displaying skin data for **' + name + '**', embed=embed)
@@ -1306,8 +1331,10 @@ async def on_message(message):
             embed = discord.Embed()
             # Format the strings for display in an embed
             for item in items:
-                item_text = '**' + item + '**'
-                embed.add_field(name='**' + item_text + '**', value=items[item], inline=False)
+                item_name = item.get_name()
+                item_price = item.get_price()
+                item_text = '**' + item_name + '**'
+                embed.add_field(name='**' + item_text + '**', value=item_price, inline=False)
             embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
             item_str = 'Item store: ' + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
             await message.channel.send(item_str, embed=embed)
