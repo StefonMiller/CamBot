@@ -1,10 +1,12 @@
+import json
 import os
 import random
 import re
 import textwrap
 import urllib
-from time import strftime, gmtime
+from time import strftime, gmtime, time
 import discord
+import requests
 from steam_community_market import Market, AppID
 from requests import get
 from contextlib import closing
@@ -14,7 +16,7 @@ from datetime import datetime, date, timedelta
 from fuzzywuzzy import fuzz
 import mysql.connector
 import asyncio
-
+import time
 
 class Skin:
     def __init__(self, name, price, type):
@@ -27,6 +29,7 @@ class Skin:
 
     def get_price(self):
         return self.p
+
     def get_type(self):
         return self.t
 
@@ -635,8 +638,45 @@ async def on_message(message):
         embed.add_field(name="**!binds**", value="Displays all supported commands to bind", inline=False)
         embed.add_field(name="**!gamble**", value="Displays bandit camp wheel percentages and calculates the "
                                                   "chance of a certain outcome occuring", inline=False)
+        embed.add_field(name="**!skinlist**", value="Displays a list of skins for a certain item"
+                                                  " for a certain item", inline=False)
         await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                    '**![commandName]**\n', embed=embed)
+
+    elif message.content.lower().startswith('!skinlist'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
+        if len(args) == 1:
+            await message.channel.send('This command displays all skins for a certain item. '
+                                       'Use **!skinlist [itemType]**')
+        # If the user entered arguments, get the arguments to determine what to do
+        else:
+            skin_type = ' '.join(args[1:])
+            with open('C:/Users/Stefon/PycharmProjects/CamBot/skin_types.txt') as file:
+                skin_type_list = file.read().splitlines()
+                file.close()
+            best_skin = get_string_best_match(skin_type_list, skin_type)
+            sql = "SELECT skin_name, link, initial_price, release_date FROM skin WHERE skin_type = \"" + best_skin + "\""
+            cursor.execute(sql)
+            data = cursor.fetchall()
+            # Theoretically, there should always be a match but if there isn't exit the command and let the user know
+            if not data:
+                await message.channel.send('No skin data found for the given skin. Use **!skindata [skinname]**\n')
+                return
+            else:
+                desc = ''
+                await message.channel.send('Displaying all skins for **' + best_skin + '**:')
+                for d in data:
+                    if len(desc) + len('[' + d[0] + '](' + d[1] + ')\n') >= 2000:
+                        embed = discord.Embed(description=desc)
+                        await message.channel.send(embed=embed)
+                        desc = ""
+                    else:
+                        desc += '[' + d[0] + '](' + d[1] + ')\n'
+                embed = discord.Embed(description=desc)
+                await message.channel.send(embed=embed)
+
 
     # Displays bandit camp wheel percentages and the chance of a certain event happening
     elif message.content.lower().startswith('!gamble'):
@@ -649,9 +689,11 @@ async def on_message(message):
                            "5\t\t\t\t16%\n" \
                            "10\t\t\t\t8%\n" \
                            "20\t\t\t\t4%```"
-            await message.channel.send('Displaying the percentages of hitting each number on the bandit camp wheel. '
-                                       'Use **!gamble [num],[num],[num],etc** to get the chance for a series of '
-                                       'outcomes to occur\n' + outcome_text)
+            await message.channel.send('This command displays the percentages of hitting a certain number on the '
+                                       'bandit '
+                                       'camp wheel. Use **!gamble [num],[num],[num],etc** to get the chance for a '
+                                       'series of outcomes to occur. Use a ! in front of a number for the probabilty '
+                                       'of the wheel not landing on it\n' + outcome_text)
         # If the user entered arguments, get the odds of that string of outcomes occuring
         else:
             # Hardcoded percentages for the wheel
@@ -670,6 +712,15 @@ async def on_message(message):
             percentage = 1
             # For each outcome entered, convert the item to a number and try to look it up in the dictionary
             for outcome in outcomes_list:
+                if outcome == '':
+                    await message.channel.send('You did not enter a number. Use something like **!gamble 1,1,1,1**')
+                    return
+                # Check if there is an exclamation mark in front of each outcome. If so, the probability should be
+                # negated(1-p)
+                negate = False
+                if outcome[0] == '!':
+                    negate = True
+                    outcome = outcome[1:]
                 # If we can't convert the number to an int, the user didn't enter the outcomes correctly
                 try:
                     outcome = int(outcome)
@@ -679,12 +730,16 @@ async def on_message(message):
                 # If the item doesn't exist in the dictionary, then the user entered something wrong
                 try:
                     # If we do get the dictionary value, multiply it by our current percent chance to get the new chance
-                    percentage = percentage * percentages[outcome]
+                    # If there was an !, negate the dictionary value
+                    if negate:
+                        percentage = percentage * (1 - percentages[outcome])
+                    else:
+                        percentage = percentage * percentages[outcome]
                 except KeyError as k:
                     await message.channel.send("You did not enter a valid wheel number. Enter 1, 3, 5, 10, or 20")
                     return
 
-            await message.channel.send('The chance of the wheel landing on ' + str(outcomes_list) + ' is **' +
+            await message.channel.send('The chance of the wheel landing on ' + ', '.join(outcomes_list) + ' is **' +
                                        "{:.2f}".format(percentage * 100) + '%**')
 
     # Outputs recycle data for a given item and item quantity
