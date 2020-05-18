@@ -326,7 +326,14 @@ def craft_calc(search_term, num_crafts):
                     quantity = int(''.join(filter(str.isdigit, ingredient.text)))
                 total = int((quantity * num_crafts) / output_number)
                 craft_string += '\t' + str(total) + ' ' + str(ingredient.find('img')['alt']) + '\n'
-
+            # Check if there is a sulfur amount in the craft footer. If so, get the total sulfur amount and
+            # output it. If we encounter an error, don't return any sulfur values
+            try:
+                foot = craft_html.find('div', {"id": "сraft-footer"})
+                sulfur_cost = int(''.join(filter(str.isdigit, foot.find(alt="Sulfur").find_next_sibling().text)))
+                craft_string += 'Total sulfur cost: **' + str(int((num_crafts * sulfur_cost)/output_number)) + '**'
+            except Exception as e:
+                pass
             return craft_string
 
 
