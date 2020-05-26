@@ -18,6 +18,7 @@ import mysql.connector
 import asyncio
 import pyotp
 
+
 class PriceSkin:
     def __init__(self, name, link, init_price, release_date, curr_price):
         self.n = name
@@ -42,6 +43,7 @@ class PriceSkin:
     def get_curr_price(self):
         return self.cp
 
+
 class Skin:
     def __init__(self, name, price, type):
         self.n = name
@@ -56,6 +58,7 @@ class Skin:
 
     def get_type(self):
         return self.t
+
 
 # Get API keys from keys text file
 with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
@@ -164,8 +167,12 @@ def insert_items(items):
         item_price = float(item_price[1:])
         try:
             item_type_html = get_html(item_type_url)
-            item_type = item_type_html.find('span', {"style": "color: #ffdba5"}).text
-            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date) VALUES(%s, %s, %s, %s, %s)"
+            item_type = item_type_html.find('span', {"style": "color: #ffdba5"})
+            if item_type is None:
+                pass
+            else:
+                item_type = item_type.text
+            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date, skin_type) VALUES(%s, %s, %s, %s, %s)"
             val = (item_name, item_url, item_price, today, item_type)
             cursor.execute(sql, val)
             connection.commit()
@@ -173,10 +180,10 @@ def insert_items(items):
             # Once we insert the items, we know it is not a duplicate entry and can insert the name into our text file
             # containing all skin names
             with open('C:/Users/Stefon/PycharmProjects/CamBot/skins.txt', "a") as file:
-                file.write(item + '\n')
+                file.write(item_name + '\n')
                 print('Added ' + item_name + ' to text file')
         except Exception as e:
-            print('Duplicate entry, skipping ' + item_name + '...')
+            print('Duplicate entry, skipping ' + item_name + '...' + str(e))
 
     return
 
@@ -331,7 +338,7 @@ def craft_calc(search_term, num_crafts):
             try:
                 foot = craft_html.find('div', {"id": "сraft-footer"})
                 sulfur_cost = int(''.join(filter(str.isdigit, foot.find(alt="Sulfur").find_next_sibling().text)))
-                craft_string += 'Total sulfur cost: **' + str(int((num_crafts * sulfur_cost)/output_number)) + '**'
+                craft_string += 'Total sulfur cost: **' + str(int((num_crafts * sulfur_cost) / output_number)) + '**'
             except Exception as e:
                 pass
             return craft_string
@@ -391,6 +398,7 @@ def get_string_best_match(str_list, search_term):
             pass
     return best_item_match
 
+
 # Gets all skin data using Bitskins API
 def get_skin_prices():
     with open('C:/Users/Stefon/PycharmProjects/CamBot/bitskins_keys.txt') as f:
@@ -408,6 +416,7 @@ def get_skin_prices():
     for name in item_names:
         item_dict[name['market_hash_name']] = name['price']
     return item_dict
+
 
 # Tweets a dynamic tweet, depending on the specified image/text
 # @Param msg: Text to tweet
@@ -521,6 +530,7 @@ def get_html(url):
         else:
             return ''
 
+
 # Gets all skins of a certain type
 def get_skins_of_type(type):
     with open('C:/Users/Stefon/PycharmProjects/CamBot/skin_types.txt') as file:
@@ -531,6 +541,7 @@ def get_skins_of_type(type):
     cursor.execute(sql)
     data = cursor.fetchall()
     return data, best_skin
+
 
 # For an input amount of sulfur, display how many rockets, c4, etc you can craft
 # @Param sulfur: How much sulfur the user has
@@ -552,7 +563,7 @@ def sulf_calc(sulfur):
 # Cross references skins of a certain type with a master list of skins and their current prices retrieved from
 # Bitskins API. This is used to get all skins of skin_type and their current prices, which will then be sorted
 # to display aggregate data on said skins
-def cross_reference_skins(skin_type = ''):
+def cross_reference_skins(skin_type=''):
     if skin_type == '':
         sql = "SELECT skin_name, link, initial_price, release_date FROM skin"
         cursor.execute(sql)
@@ -563,7 +574,8 @@ def cross_reference_skins(skin_type = ''):
             # Attempt to add a skin to the list. If there is a key error, then the skin was added this week and has
             # no market data. Thus, we can skip it.
             try:
-                cross_referenced_skin_list.append(PriceSkin(skin[0], skin[1], skin[2], skin[3], skin_price_list[skin[0]]))
+                cross_referenced_skin_list.append(
+                    PriceSkin(skin[0], skin[1], skin[2], skin[3], skin_price_list[skin[0]]))
             except KeyError as e:
                 pass
         return cross_referenced_skin_list
@@ -578,10 +590,12 @@ def cross_reference_skins(skin_type = ''):
             # Attempt to add a skin to the list. If there is a key error, then the skin was added this week and has
             # no market data. Thus, we can skip it.
             try:
-                cross_referenced_skin_list.append(PriceSkin(skin[0], skin[1], skin[2], skin[3], skin_price_list[skin[0]]))
+                cross_referenced_skin_list.append(
+                    PriceSkin(skin[0], skin[1], skin[2], skin[3], skin_price_list[skin[0]]))
             except KeyError as e:
                 pass
         return cross_referenced_skin_list, best_skin
+
 
 # Return the recycle output for a given item
 # @Param search_term item user is searching for
@@ -731,9 +745,23 @@ async def on_message(message):
         embed.add_field(name="**!gamble**", value="Displays bandit camp wheel percentages and calculates the "
                                                   "chance of a certain outcome occuring", inline=False)
         embed.add_field(name="**!skinlist**", value="Displays a list of skins for a certain item"
-                                                  " for a certain item", inline=False)
+                                                    " for a certain item", inline=False)
         await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                    '**![commandName]**\n', embed=embed)
+
+    # TODO Finish command
+    elif message.content.lower().startswith('!raidcalc'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
+        if len(args) == 1:
+            await message.channel.send('This command displays the amount of rockets/c4/etc to get through a certain'
+                                       ' amount of walls/doors. Use **!raidcalc [wall/door type] '
+                                       '[number of walls/doors]**\n For multiple walls/doors, use a comma separated '
+                                       'list. Ex: !raidcalc sheet wall 2, garage door 5')
+        # If the user entered arguments, get the arguments to determine what to do
+        else:
+            pass
 
     elif message.content.lower().startswith('!skinlist'):
         # Split the input command into a list
@@ -1123,10 +1151,10 @@ async def on_message(message):
                 start = 0
                 for key in key_list:
                     if start % 2 == 0:
-                        embed.add_field(name=key, value=key_list[start+1], inline=False)
+                        embed.add_field(name=key, value=key_list[start + 1], inline=False)
                     start += 1
                 await message.channel.send("Displaying all supported keys you can bind commands to. In Rust console, "
-                                           "enter **bind [key] [command]**\n",  embed=embed)
+                                           "enter **bind [key] [command]**\n", embed=embed)
             elif args[1].lower() == 'gestures':
                 # Open text file and get all lines. The txt file is structured so the first line is an embed title and
                 # the next is the embed value
