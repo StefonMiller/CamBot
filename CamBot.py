@@ -345,7 +345,7 @@ def craft_calc(search_term, num_crafts):
 
 
 # Returns the best item in i_list matching term. Used for craftcalc and serverpop commands
-# @Param i_list: list of items that have the text attirbute for comparison
+# @Param i_list: list of items that have a text attirbute for comparison
 # @Param term: search term entered
 # @Param scorer: scoring method for fuzzywuzzy
 # @Return: Best matching element in i_list
@@ -672,7 +672,7 @@ async def on_voice_state_update(member, before, after):
                     leave_strings = leave.read().splitlines()
                     leave_string = random.choice(leave_strings)
                     f.close()
-                # If an exception is raised when trying to send a message, then squaddies is not a text channel
+                # If an exception is raised when trying to send a message, then the channel is a voice channel
                 try:
                     await output_channel.send(member.name + ' left ' + leave_string)
                 except Exception as e:
@@ -746,10 +746,13 @@ async def on_message(message):
                                                   "chance of a certain outcome occuring", inline=False)
         embed.add_field(name="**!skinlist**", value="Displays a list of skins for a certain item"
                                                     " for a certain item", inline=False)
+        embed.add_field(name="**!raidcalc**", value="Calculates how many rockets/c4/etc to get through a certain"
+                                                    " amount of walls/doors", inline=False)
+        embed.add_field(name="**!durability**", value="Displays how much of various tools/explosives it takes"
+                                                      " to get through a certain building item", inline=False)
         await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                    '**![commandName]**\n', embed=embed)
 
-    # TODO Finish command
     elif message.content.lower().startswith('!raidcalc'):
         # Split the input command into a list
         args = message.content.lower().split()
@@ -761,7 +764,102 @@ async def on_message(message):
                                        'list. Ex: !raidcalc sheet wall 2, garage door 5')
         # If the user entered arguments, get the arguments to determine what to do
         else:
-            pass
+            # Rejoin the arguments without the command input
+            args = ' '.join(args[1:])
+            # Split the joined string by comma to separate buildings entered by the user
+            buildings = args.split(',')
+            # Get a master list of all building items from the 2 links below. This is done outside of the for loop
+            # to improve efficiency as getting this list has a lot of overhead.
+            building_block_html = get_html('https://rustlabs.com/group=building-blocks')
+            construction_html = get_html('https://rustlabs.com/group=build')
+            all_links = []
+            # Get all links from the building blocks page and insert them into the list
+            building_block_tables = building_block_html.find_all('table', {"class": "table w100 olive"})
+            for table in building_block_tables:
+                rows = table.find_all('tr')
+                for row in rows:
+                    all_links.append(row.find('a'))
+            # Get all links from the construction page and insert them into the list. This cannot be done with a
+            # method as both pages are structured differently from each other
+            construction_links = construction_html.find('div', {"class": "info-block group"}).find_all('a')
+            for link in construction_links:
+                all_links.append(link)
+            explosive_cost = ''
+            total_min_sulfur = 0
+            min_sulfur_string = ''
+            # For each building block the user entered, get the sulfur cost of raiding it
+            for building in buildings:
+                # Get the amount of the current building the user wants to blow through
+                building_args = building.split()
+                # If we encounter a type error when attempting to cast the last argument in our current building, then
+                # we assume the user only wants to destroy 1
+                num_building = 0
+                building_name = []
+                try:
+                    num_building = int(building_args[-1])
+                    for building_arg in building_args:
+                        # In the case that we are able to cast the last argument to an int, append all arguments but the
+                        # last(which is the number) to the item's name
+                        if not building_arg == building_args[-1]:
+                            building_name.append(building_arg)
+                except ValueError as e:
+                    num_building = 1
+                    # In the case that we are unable to cast the name to an int, then add all arguments to the item
+                    # name
+                    for building_arg in building_args:
+                        building_name.append(building_arg)
+                if num_building <= 0:
+                    await message.channel.send('Please enter a positive integer')
+                    return
+                building_name = ' '.join(building_name)
+                # Once we have the building name, search for the best matching one based on the user's search term
+                best_building = get_best_match(all_links, building_name)
+                # Once we have the best matching link based on name, open the link to the durability tab
+                best_building_html = get_html(
+                    'http://www.rustlabs.com' + best_building['href'] + '#tab=destroyed-by;filter=0,1,0,0,0;sort=4,0,2')
+                # On the durability tab, get all items in the table containing explosive costs
+                all_explosives = best_building_html.find_all('tr', {"data-group": "explosive"})
+                explosive_cost += '\n\nTo get through **' + str(num_building) + ' ' + best_building.text + \
+                                  '**, you would need:'
+                # These two variables will be used to calculate the minimum sulfur for the current building item
+                min_sulfur = 999999
+                lowest_explosive = ''
+                # Iterate through the list of all explosives and only get the data of the ones we are looking for
+                for explosive_row in all_explosives:
+                    flag = True
+                    if explosive_row.has_attr("data-group2"):
+                        # Hack to stop displaying duplicate data for hard and soft side blocks
+                        if explosive_row["data-group2"] == 'soft':
+                            flag = False
+                    if flag:
+                        # If the current row we are looking at is one of the items we are looking for, add its data to our
+                        # output string
+                        explosive_name = explosive_row.find('a').text
+                        explosive = explosive_row.find_all('td')
+                        if explosive_name == 'Timed Explosive Charge' or explosive_name == 'Rocket' or \
+                                explosive_name == 'Satchel Charge' or explosive_name == 'Explosive 5.56 Rifle Ammo':
+                            curr_sulfur = (num_building * int(''.join(filter(str.isdigit, explosive[5].text))))
+                            # Get the item name, quantity, and sulfur cost and append them to explosive_cost
+                            curr_cost = '\n\t\t' + str(num_building * int(explosive[2].text)) + ' ' + explosive_name + \
+                                        '(**' + str(curr_sulfur) + ' sulfur**)'
+                            explosive_cost += curr_cost
+                            if curr_sulfur < min_sulfur:
+                                min_sulfur = curr_sulfur
+                                lowest_explosive = curr_cost + ' for the ' + building_name
+                                if num_building > 1:
+                                    lowest_explosive += 's'
+
+                # If the minimum didn't change, then the item cannot be broken
+                if min_sulfur == 999999:
+                    await message.channel.send('You cannot break one or more of the items you entered')
+                    return
+                else:
+                    # Add minimum sulfur cost to the total minimum
+                    total_min_sulfur += min_sulfur
+                    min_sulfur_string += lowest_explosive
+            await message.channel.send(explosive_cost + '\n\nThe cheapest path would cost **' + str(total_min_sulfur) +
+                                       ' sulfur** by using:' + min_sulfur_string)
+
 
     elif message.content.lower().startswith('!skinlist'):
         # Split the input command into a list
