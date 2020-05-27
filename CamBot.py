@@ -750,9 +750,55 @@ async def on_message(message):
                                                     " amount of walls/doors", inline=False)
         embed.add_field(name="**!durability**", value="Displays how much of various tools/explosives it takes"
                                                       " to get through a certain building item", inline=False)
+        embed.add_field(name="**!experiment**", value="Displays experiment tables of the tier 1, 2, and 3 workbenches",
+                                    inline=False)
         await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                    '**![commandName]**\n', embed=embed)
 
+    elif message.content.lower().startswith('!experiment'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
+        if len(args) == 1:
+            await message.channel.send('This command displays the experiment tables for each workbench. Use '
+                                       '**!experiment [1, 2, or 3]** to get tables for each respective workbench')
+        # If the user entered arguments, get the arguments to determine what to do
+        else:
+            # Make sure the user entered a workbench tier
+            try:
+                tier = int(args[-1])
+            except ValueError as e:
+                await message.channel.send('Please enter a valid number')
+                return
+            # Ensure the tier was either 1, 2, or 3
+            if tier == 1 or tier == 2 or tier == 3:
+                # Get the workbench HTML and extract all items listed under the experiment tab
+                workbench_html = get_html('https://rustlabs.com/item/work-bench-level-' + str(tier) + '#tab=experiment')
+                workbench_table = workbench_html.find('div', {"data-name": "experiment"}).find('tbody')
+                items = workbench_table.find_all('tr')
+                table_string = ''
+                num_items = 0
+                for item in items:
+                    table_string += ' '.join(item.find('a').text.split()[:-1]) + '\n'
+                    num_items += 1
+                await message.channel.send('Displaying the experiment table for **workbench level ' + str(tier)
+                                           + '**:\n')
+                # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
+                if len(table_string) > 2000:
+                    # Split the message every 1900 character, preserving formatting
+                    messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
+                    # Once the message has been split into a list, iterate through and post it as code to make it look
+                    # halfway decent
+                    for msg in messages:
+                        await message.channel.send('```' + msg + '```')
+                    await message.channel.send('The chance of getting one item is 1 in ' + str(num_items) + ' or '
+                                               + '{0:.2f}'.format((1/num_items) * 100) + '%')
+                else:
+                    await message.channel.send('```' + table_string + '```' + 'The chance of getting one item is 1 in '
+                                               + str(num_items) + ' or ' + '{0:.2f}'.format((1/num_items) * 100) + '%')
+            else:
+                await message.channel.send('Please enter a valid number')
+                return
     elif message.content.lower().startswith('!raidcalc'):
         # Split the input command into a list
         args = message.content.lower().split()
