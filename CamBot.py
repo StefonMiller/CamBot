@@ -1,3 +1,4 @@
+import calendar
 import json
 import os
 import random
@@ -12,11 +13,14 @@ from requests import get
 from contextlib import closing
 from bs4 import BeautifulSoup
 import tweepy
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 from fuzzywuzzy import fuzz
 import mysql.connector
 import asyncio
 import pyotp
+import skinml
+
+updated_devblog = False
 
 
 class PriceSkin:
@@ -45,10 +49,11 @@ class PriceSkin:
 
 
 class Skin:
-    def __init__(self, name, price, type):
+    def __init__(self, name, price, type, predicted_price):
         self.n = name
         self.p = price
         self.t = type
+        self.pr = predicted_price
 
     def get_name(self):
         return self.n
@@ -58,6 +63,9 @@ class Skin:
 
     def get_type(self):
         return self.t
+
+    def get_predicted_price(self):
+        return self.pr
 
 
 # Get API keys from keys text file
@@ -89,21 +97,28 @@ except Exception as e:
 
 # Background task used to check for website changes
 async def check():
+    global updated_devblog
     await client.wait_until_ready()
     while not client.is_closed():
         print('Checking for site changes...')
         # Get the first skin in the rust item store to check for changes
         items, total_item_price = get_rust_items('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
-        item_name = next(iter(items))
-        i_name = item_name.get_name()
+
         # Get the title of the newest article on rustafied to check for changes
         news_title, news_desc = get_news('https://rustafied.com')
 
         # Get the title of the newest devblog to check for updates
         devblog_title, devblog_url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
 
+        # Only check for rust item updates if we get items from the item store. If no items were returned, then
+        # the store is currently updating or is having issues
+        if items:
+            item_name = next(iter(items))
+            i_name = item_name.get_name()
+            item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', i_name)
+        else:
+            item_status = 0
         # Check if any of the corresponding text files were updated
-        item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', i_name)
         news_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_news.txt', news_title)
         devblog_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_devblog.txt', devblog_title)
 
@@ -135,10 +150,48 @@ async def check():
             if devblog_status == 1:
                 await post_devblog_update(channel_list, devblog_title, devblog_url, desc)
                 print('Posted devblog update')
+                updated_devblog = True
         else:
             print('No changes found...')
             pass
-        await asyncio.sleep(900)
+        sleep_timer = 900
+        # Check if it is the first thursday of the month. If it is, then check if the flag for updating the
+        # devblog has been set to true. If it hasn't, then we can set the sleep_timer to 60 until we update the
+        # Devblog which will set the flag to true. Then, if the day is not the first thursday of the month, we will
+        # set the flag back to false
+        if check_day():
+            print('It is the first thursday of the month')
+            if not updated_devblog:
+                print('Devblog not updated, checking if wipe is close')
+                sleep_timer = check_time()
+        else:
+            print('Not first thursday of the month, keeping sleep timer the same')
+            updated_devblog = False
+
+        await asyncio.sleep(sleep_timer)
+
+
+# Checks if we are within 1 hour of normal wipe time and returns a sleep time corresponding to the answer
+def check_time():
+    wipe_time = datetime.strptime('14:00:00', "%H:%M:%S")
+    current_time = datetime.now()
+    difference = wipe_time - current_time
+
+    # If there is more than 1 hour + the max sleep time before wipe
+    if (difference.seconds / 60) > 60:
+        print('Wipe is not close enough...')
+        return 900
+    else:
+        print('Wipe is close...')
+        return 60
+
+
+# Checks if it is the first thrusday of the month and returns true if it is
+def check_day():
+    nth = 1
+    if date(date.today().year, date.today().month, 1).weekday() == 3:
+        nth = nth - 1
+    return date.today() == calendar.Calendar(3).monthdatescalendar(date.today().year, date.today().month)[nth][0]
 
 
 # Returns the player count of a certain server URL on Battlemetrics.com
@@ -500,7 +553,8 @@ def get_rust_items(item_url):
         item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
         item_price_in_double = float(item_price[1:])
         total_price += item_price_in_double
-        item_list.append(Skin(item_name, item_price, item_type))
+        predicted_price = skinml.get_predicted_price(item_type)
+        item_list.append(Skin(item_name, item_price, item_type, predicted_price))
     return item_list, total_price
 
 
@@ -751,7 +805,7 @@ async def on_message(message):
         embed.add_field(name="**!durability**", value="Displays how much of various tools/explosives it takes"
                                                       " to get through a certain building item", inline=False)
         embed.add_field(name="**!experiment**", value="Displays experiment tables of the tier 1, 2, and 3 workbenches",
-                                    inline=False)
+                        inline=False)
         await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                    '**![commandName]**\n', embed=embed)
 
@@ -792,10 +846,11 @@ async def on_message(message):
                     for msg in messages:
                         await message.channel.send('```' + msg + '```')
                     await message.channel.send('The chance of getting one item is 1 in ' + str(num_items) + ' or '
-                                               + '{0:.2f}'.format((1/num_items) * 100) + '%')
+                                               + '{0:.2f}'.format((1 / num_items) * 100) + '%')
                 else:
                     await message.channel.send('```' + table_string + '```' + 'The chance of getting one item is 1 in '
-                                               + str(num_items) + ' or ' + '{0:.2f}'.format((1/num_items) * 100) + '%')
+                                               + str(num_items) + ' or ' + '{0:.2f}'.format(
+                        (1 / num_items) * 100) + '%')
             else:
                 await message.channel.send('Please enter a valid number')
                 return
@@ -1811,7 +1866,8 @@ async def on_message(message):
                 item_name = item.get_name()
                 item_price = item.get_price()
                 item_text = '**' + item_name + '**'
-                embed.add_field(name='**' + item_text + '**', value=item_price, inline=False)
+                embed.add_field(name='**' + item_text + '**', value=item_price + ' -> $' + item.get_predicted_price(),
+                                inline=False)
             embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
             item_str = 'Item store: ' + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
             await message.channel.send(item_str, embed=embed)
