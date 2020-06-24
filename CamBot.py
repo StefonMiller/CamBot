@@ -102,7 +102,8 @@ async def check():
     while not client.is_closed():
         print('Checking for site changes...')
         # Get the first skin in the rust item store to check for changes
-        items, total_item_price = get_rust_items('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+        check_item_html = get_html('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+        check_item = check_item_html.find('div', {"class": "item_def_name ellipsis"}).find('a').text
 
         # Get the title of the newest article on rustafied to check for changes
         news_title, news_desc = get_news('https://rustafied.com')
@@ -112,10 +113,8 @@ async def check():
 
         # Only check for rust item updates if we get items from the item store. If no items were returned, then
         # the store is currently updating or is having issues
-        if items:
-            item_name = next(iter(items))
-            i_name = item_name.get_name()
-            item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', i_name)
+        if check_item:
+            item_status = check_for_updates('C:/Users/Stefon/PycharmProjects/CamBot/current_skins.txt', check_item)
         else:
             item_status = 0
         # Check if any of the corresponding text files were updated
@@ -142,6 +141,8 @@ async def check():
                     channel_list.append(first_channel)
 
             if item_status == 1:
+                items, total_item_price = get_rust_items(
+                    'https://store.steampowered.com/itemstore/252490/browse/?filter=All')
                 await update_items(channel_list, items, total_item_price)
                 print('Posted item store update')
             if news_status == 1:
