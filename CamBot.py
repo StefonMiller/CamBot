@@ -19,6 +19,8 @@ import mysql.connector
 import asyncio
 import pyotp
 import skinml
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 
 updated_devblog = False
 
@@ -49,11 +51,12 @@ class PriceSkin:
 
 
 class Skin:
-    def __init__(self, name, price, type, predicted_price):
+    def __init__(self, name, price, type, predicted_price, img_url):
         self.n = name
         self.p = price
         self.t = type
         self.pr = predicted_price
+        self.im = img_url
 
     def get_name(self):
         return self.n
@@ -66,6 +69,10 @@ class Skin:
 
     def get_predicted_price(self):
         return self.pr
+
+    def get_img_url(self):
+        return self.im
+        return self.im
 
 
 # Get API keys from keys text file
@@ -223,7 +230,7 @@ def insert_items(items):
             item_type_html = get_html(item_type_url)
             item_type = item_type_html.find('span', {"style": "color: #ffdba5"})
             if item_type is None:
-                pass
+                item_type = 'LR-300'
             else:
                 item_type = item_type.text
             sql = "INSERT INTO skin (skin_name, link, initial_price, release_date, skin_type) VALUES(%s, %s, %s, %s, %s)"
@@ -454,10 +461,13 @@ def get_string_best_match(str_list, search_term):
 
 
 # Gets all skin data using Bitskins API
+# @Return: A dictionary filled with skin data for every item
 def get_skin_prices():
+    # Open file containing API keys
     with open('C:/Users/Stefon/PycharmProjects/CamBot/bitskins_keys.txt') as f:
         lines = f.read().splitlines()
         f.close()
+    # Use API keys to connect to the api and send a request for skin prices
     api_key = lines[0]
     secret = lines[1]
     my_secret = secret
@@ -465,6 +475,7 @@ def get_skin_prices():
     r = requests.get(
         'https://bitskins.com/api/v1/get_all_item_prices/?api_key=' + api_key + '&code=' + my_token.now() + '&app_id=252490')
     data = r.json()
+    # Get all price data from the request and fill a dictionary with it
     item_names = data['prices']
     item_dict = {}
     for name in item_names:
@@ -541,22 +552,85 @@ def get_news(news_url):
 def get_rust_items(item_url):
     item_html = get_html(item_url)
     item_divs = item_html.find_all('div', {"class": "item_def_grid_item"})
-    item_list = []
-    total_price = 0
-    for i in item_divs:
-        # Get div containing item name and store its text attribute
-        item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
-        item_name = item_name_div.text
-        item_type = i.find('a')['href']
-        # Get div containing item price and store its text attribute
-        item_price_div = i.find('div', {"class": "item_def_price"})
-        # Convert the price to a double for addition and store it in the total price var
-        item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
-        item_price_in_double = float(item_price[1:])
-        total_price += item_price_in_double
-        predicted_price = skinml.get_predicted_price(item_type)
-        item_list.append(Skin(item_name, item_price, item_type, predicted_price))
-    return item_list, total_price
+
+    # Check if the items we are attempting to get data on are cached or not
+    first_item_name = item_divs[0].find('div', {"class": "item_def_name ellipsis"}).text
+    # Open the file containing the cached item data and get the first item name
+    with open("C:/Users/Stefon/PycharmProjects/CamBot/cached_items.txt") as file:
+        cache = file.read().splitlines()
+        file.close()
+
+    if not cache:
+        # If the data we are looking up is not cached, then look everything up and add it to the text file
+        print('No match')
+        with open("C:/Users/Stefon/PycharmProjects/CamBot/cached_items.txt", 'w') as f:
+            item_list = []
+            total_price = 0
+            for i in item_divs:
+                # Get div containing item name and store its text attribute
+                item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
+                item_name = item_name_div.text
+                item_type = i.find('a')['href']
+                # Get div containing item price and store its text attribute
+                item_price_div = i.find('div', {"class": "item_def_price"})
+                # Convert the price to a double for addition and store it in the total price var
+                item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
+                item_price_in_double = float(item_price[1:])
+                total_price += item_price_in_double
+                # Get the predicted price of the item using the skinML module
+                predicted_price = skinml.get_predicted_price(item_type)
+                # Get the url of the item's image
+                img_html = get_html(item_type)
+                img_src = img_html.find('img', {"class": "workshop_preview_image"})['src']
+                img_src = img_src.replace('65f', '360f')
+                item_list.append(Skin(item_name, item_price, item_type, predicted_price, img_src))
+                write_text = item_name + ',' + item_price + ',' + item_type + ',' + predicted_price + ',' +\
+                             img_src + '\n'
+                f.write(write_text)
+            f.close()
+
+        return item_list, total_price
+    else:
+        f_name = cache[0].split(',')[0]
+
+        # If the cached name is the same as the name we are looking up, then we do not need to scrape the item store
+        if f_name == first_item_name:
+            item_list = []
+            total_price = 0
+            for line in cache:
+                data = line.split(',')
+                total_price += float(data[1].replace('$', ''))
+                item_list.append(Skin(data[0], data[1], data[2], data[3], data[4]))
+            return item_list, total_price
+        else:
+            # If the data we are looking up is not cached, then look everything up and add it to the text file
+            print('No match')
+            with open("C:/Users/Stefon/PycharmProjects/CamBot/cached_items.txt", 'w') as f:
+                item_list = []
+                total_price = 0
+                for i in item_divs:
+                    # Get div containing item name and store its text attribute
+                    item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
+                    item_name = item_name_div.text
+                    item_type = i.find('a')['href']
+                    # Get div containing item price and store its text attribute
+                    item_price_div = i.find('div', {"class": "item_def_price"})
+                    # Convert the price to a double for addition and store it in the total price var
+                    item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
+                    item_price_in_double = float(item_price[1:])
+                    total_price += item_price_in_double
+                    # Get the predicted price of the item using the skinML module
+                    predicted_price = skinml.get_predicted_price(item_type)
+                    # Get the url of the item's image
+                    img_html = get_html(item_type)
+                    img_src = img_html.find('img', {"class": "workshop_preview_image"})['src']
+                    img_src = img_src.replace('65f', '360f')
+                    item_list.append(Skin(item_name, item_price, item_type, predicted_price, img_src))
+                    write_text = ','.join(item_name, item_price, item_type, predicted_price, img_src) + '\n'
+                    f.write(write_text)
+                f.close()
+
+            return item_list, total_price
 
 
 # Gets an item from the RustLabs item page with name closest matching item_name
@@ -1861,17 +1935,52 @@ async def on_message(message):
             await message.channel.send('Rust item store is not hot!!!')
         # If we have entries, format and display them
         else:
-            embed = discord.Embed()
-            # Format the strings for display in an embed
+
+            # Get the longest item name in the database
+            sql = "SELECT skin_name FROM skin ORDER BY LENGTH(skin_name) DESC LIMIT 1;"
+            cursor.execute(sql)
+            largest_string = cursor.fetchall()[0]
+
+            # For each item, get its data and display it as an image
+            await message.channel.send('Item store: ' + '<https://store.steampowered.com/itemstore/252490/browse/?'
+                                                        'filter=All>\nPrices on the far right are predicted after'
+                                                        ' 1 year on the market.')
             for item in items:
+                # Get the item's data
                 item_name = item.get_name()
                 item_price = item.get_price()
-                item_text = '**' + item_name + '**'
-                embed.add_field(name='**' + item_text + '**', value=item_price + ' -> $' + item.get_predicted_price(),
-                                inline=False)
-            embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
-            item_str = 'Item store: ' + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
-            await message.channel.send(item_str, embed=embed)
+                predicted_price = item.get_predicted_price()
+                img_src = item.get_img_url()
+                img_resp = requests.get(img_src)
+                skin_img = Image.open(BytesIO(img_resp.content))
+
+                # Set icon size and font type/size
+                icon_size = 64, 64
+                fnt = ImageFont.truetype("whitneysemibold.ttf", 20)
+                # Set the image height and width. The height is the height of the icon and width is
+                # set to the longest string size
+                img_height = icon_size[0]
+                img_width = icon_size[1] + (fnt.getsize('\t' + largest_string[0] + '\t\t$99.99\t\t$99.99')[0])
+                img = Image.new(mode="RGBA", size=(img_width, img_height), color=(0, 0, 0, 0))
+
+                # Draw skin's image on a transparent image and write the item's data as text
+                skin_img.thumbnail(icon_size, Image.ANTIALIAS)
+                img.paste(skin_img, (0, 0), skin_img)
+                d = ImageDraw.Draw(img)
+                paste_str = '\t' + item_name + '\t\t' + str(item_price) + '\t\t$' + str(predicted_price)
+
+                # Right justify the text so it looks nicer
+                text_length = fnt.getsize(paste_str)[0]
+                paste_x = img_width - text_length
+
+                d.text((paste_x, ((icon_size[1] // 2) - 20)), paste_str, font=fnt,
+                       fill=(255, 255, 255))
+
+                # Upload the files 1 by 1. Using the 'files' argument only uploaded the last file
+                img.save('temp.png')
+                with open('temp.png', 'rb') as f:
+                    file = discord.File(f)
+                await message.channel.send(file=file)
 
 
     # Gets the recipe for a certain item
