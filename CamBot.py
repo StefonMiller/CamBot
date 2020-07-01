@@ -21,6 +21,7 @@ import pyotp
 import skinml
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
+from pandas import DataFrame
 
 updated_devblog = False
 
@@ -260,18 +261,26 @@ async def update_items(channels, items, total_price):
         pass
     # If we have entries, format and display them
     else:
-        embed = discord.Embed()
-        # Format the strings for display in an embed
-        for item in items:
-            item_name = item.get_name()
-            item_price = item.get_price()
-            item_text = '**' + item_name + '**'
-            embed.add_field(name='**' + item_text + '**', value=item_price, inline=False)
-        embed.add_field(name='**Total Price:** ', value=total_item_price, inline=False)
-        item_str = 'The Rust item store has updated with new items: ' \
-                   + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n'
+        # Get the longest item name in the database
+        sql = "SELECT skin_name FROM skin ORDER BY LENGTH(skin_name) DESC LIMIT 1;"
+        cursor.execute(sql)
+        largest_string = cursor.fetchall()[0]
+
+        img_list = gen_images(items, largest_string[0])
+
         for channel in channels:
-            await channel.send(item_str, embed=embed)
+            await channel.send('The Rust item store has updated with new items: ' \
+                               + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n')
+            for img in img_list:
+                # Upload the files 1 by 1. Using the 'files' argument only uploaded the last file
+                img.save('temp.png')
+                with open('temp.png', 'rb') as f:
+                    file = discord.File(f)
+                await channel.send(file=file)
+    # Send out a tweet when the item store updates
+    tweet('The Rust item store has updated with new items: https://store.steampowered.com/itemstore/252490/'
+          'browse/?filter=All')
+
     insert_items(items)
     return
 
@@ -285,6 +294,7 @@ async def post_devblog_update(channels, title, url, desc):
     embed = discord.Embed(title=title, url=url, description=desc)
     for channel in channels:
         await channel.send('A new Rust devblog has been uploaded:', embed=embed)
+    tweet('A new Rust devblog has been uploaded: ' + url)
     return
 
 
@@ -296,6 +306,7 @@ async def post_rust_news_update(channels, title, desc):
     embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
     for channel in channels:
         await channel.send('Rustafied has published a new news article', embed=embed)
+    tweet('Rustafied has published a news article https://rustafied.com')
     return
 
 
@@ -326,19 +337,21 @@ def check_for_updates(current_path, current_data):
 
 
 # Gets the status of all servers the CamBot is dependent on
-# @Return: whether or not we were able to successfully connect to all servers
+# @Return: List of servers and connection stats
 def get_status():
-    # Attempt connection to each dependent server and if the status is not 200, return false
+    # Fill an array with each server we want to test
     import requests
-    servers = [requests.head('https://www.battlemetrics.com/'), requests.head('https://rust.facepunch.com/blog/'),
-               requests.head('https://www.rustlabs.com/'), requests.head('https://rustafied.com/')]
+    server_names = ['https://www.battlemetrics.com', 'https://rust.facepunch.com/blog/', 'https://www.rustlabs.com/',
+                  'https://rustafied.com/']
 
-    for server in servers:
-        if server.status_code == 200 or 301:
-            pass
+    server_dict = {}
+    for server in server_names:
+        connection_status = requests.head(server)
+        if connection_status.status_code == 200 or 301:
+            server_dict[server] = 	'🟢'
         else:
-            return 'Serv ' + server.url + ' is NOT hot, status code alpha bravo ' + str(server.status_code) + '!!!'
-    return 'All servs r hot n ready like little C\'s'
+            server_dict[server] = '🔴'
+    return server_dict
 
 
 # Returns the crafting recipe for a certain item in the rustitem database
@@ -584,7 +597,7 @@ def get_rust_items(item_url):
                 img_src = img_html.find('img', {"class": "workshop_preview_image"})['src']
                 img_src = img_src.replace('65f', '360f')
                 item_list.append(Skin(item_name, item_price, item_type, predicted_price, img_src))
-                write_text = item_name + ',' + item_price + ',' + item_type + ',' + predicted_price + ',' +\
+                write_text = item_name + ',' + item_price + ',' + item_type + ',' + predicted_price + ',' + \
                              img_src + '\n'
                 f.write(write_text)
             f.close()
@@ -650,6 +663,8 @@ def get_item(item_name):
 
 
 # Gets a BeautifulSoup html object from a given url, and prints out an error if there was an error connecting
+# @Param url: URL to scrape
+# @Return BS4 object if the scrape was successful. Empty string if unsuccessful
 def get_html(url):
     with closing(get(url, stream=True)) as resp:
         content_type = resp.headers['Content-Type'].lower()
@@ -661,14 +676,19 @@ def get_html(url):
 
 
 # Gets all skins of a certain type
+# @Param type: Type of skin to look up
+# @Return: The category matching best matching type and the resulting skins of that category
 def get_skins_of_type(type):
+    # Get the skin category closest to type
     with open('C:/Users/Stefon/PycharmProjects/CamBot/skin_types.txt') as file:
         skin_type_list = file.read().splitlines()
         file.close()
     best_skin = get_string_best_match(skin_type_list, type)
+    # Select all skins of that category
     sql = "SELECT skin_name, link, initial_price, release_date FROM skin WHERE skin_type = \"" + best_skin + "\""
     cursor.execute(sql)
     data = cursor.fetchall()
+    # Return data for skins of that category and the category name
     return data, best_skin
 
 
@@ -775,6 +795,61 @@ def recycle(search_term, num_items):
         return recycle_text
 
 
+# Generates a list of PIL images for a list of skins from the item store
+# @Param items: List of items from the rust item store
+# @Param largest_string: Largest string found in the database. Used for padding
+# @Return: List of PIL images corresponding each item in items
+def gen_images(items, largest_string):
+    img_list = []
+    for item in items:
+        # Get the item's data
+        item_name = item.get_name()
+        item_price = item.get_price()
+        predicted_price = item.get_predicted_price()
+        img_src = item.get_img_url()
+        img_resp = requests.get(img_src)
+        skin_img = Image.open(BytesIO(img_resp.content))
+
+        # Set icon size and font type/size
+        icon_size = 64, 64
+        fnt = ImageFont.truetype("whitneysemibold.ttf", 20)
+        # Set the image height and width. The height is the height of the icon and width is
+        # set to the longest string size
+        img_height = icon_size[0]
+        # Total width of the image is 64 + space b/tween img and text + longest string possible
+        img_width = icon_size[1] + (fnt.getsize('\t' + largest_string + '\t\t$99.99\t\t$99.99')[0])
+        img = Image.new(mode="RGBA", size=(img_width, img_height), color=(0, 0, 0, 0))
+
+        # Draw skin's image on a transparent image and write the item's data as text
+        skin_img.thumbnail(icon_size, Image.ANTIALIAS)
+        img.paste(skin_img, (0, 0), skin_img)
+        d = ImageDraw.Draw(img)
+        paste_str = '\t' + item_name + '\t\t' + str(item_price) + ' -> $' + str(predicted_price)
+
+        # Right justify the text so it looks nicer
+        text_length = fnt.getsize(paste_str)[0]
+        paste_x = img_width - text_length
+
+        d.text((paste_x, ((icon_size[1] // 2) - 20)), paste_str, font=fnt,
+               fill=(255, 255, 255))
+        img_list.append(img)
+    return img_list
+
+
+# Formats a list of strings into multiple columns of equal width
+# @Param str_list: List of strings to columnize
+# @Param cols: Number of columns
+# @Return: Formatted string representing all items in str_list
+def format_text(str_list, cols):
+    # Get the length of the longest string in the list
+    max_width = max(map(lambda x: len(x), str_list))
+    # Justify all strings to the left
+    justify_list = list(map(lambda x: x.ljust(max_width), str_list))
+    # Pad the columns to equal widths
+    lines = (' '.join(justify_list[i:i + cols]) for i in range(0, len(justify_list), cols))
+    # Join all lines and return the resulting string
+    return '\n'.join(lines)
+
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
@@ -844,43 +919,42 @@ async def on_message(message):
     if not message.content.lower().startswith('!'):
         return
 
-    # TODO Finish command list
     # Display all commands. This was originally a function call but I didn't really see the point if using embeds
     if message.content.lower().startswith('!cambot'):
         embed = discord.Embed()
-        embed.add_field(name="**!craftcalc**", value="Outputs the recipe of an item", inline=False)
+        embed.add_field(name="**!craftcalc**", value="Outputs the recipe of an item", inline=True)
         embed.add_field(name="**!status**", value="Outputs the current status of CamBot's dependent servers",
-                        inline=False)
-        embed.add_field(name="**!serverpop**", value="Outputs the current pop of any server", inline=False)
+                        inline=True)
+        embed.add_field(name="**!serverpop**", value="Outputs the current pop of any server", inline=True)
         embed.add_field(name="**!devblog**", value="Posts a link to the newest devblog with a short summary",
-                        inline=False)
+                        inline=True)
         embed.add_field(name="**!rustnews**", value="Posts a link to the latest news on Rust's development info",
-                        inline=False)
+                        inline=True)
         embed.add_field(name="**!rustitems**", value="Displays all items on the Rust store along with prices",
-                        inline=False)
-        embed.add_field(name="**!droptable**", value="Outputs the drop table for a crate/NPC", inline=False)
-        embed.add_field(name="**!lootfrom**", value="Outputs drop rates for a specific item", inline=False)
+                        inline=True)
+        embed.add_field(name="**!droptable**", value="Outputs the drop table for a crate/NPC", inline=True)
+        embed.add_field(name="**!lootfrom**", value="Outputs drop rates for a specific item", inline=True)
         embed.add_field(name="**!sulfur**", value="Outputs how many explosives you can craft with a specific sulfur "
-                                                  "amount", inline=False)
+                                                  "amount", inline=True)
         embed.add_field(name="**!furnaceratios**", value="Shows the most efficient furnace ratios for a given furnace "
-                                                         "and ore type", inline=False)
-        embed.add_field(name="**!smelting**", value="Shows smelting data for a given item", inline=False)
-        embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=False),
-        embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=False),
-        embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=False)
-        embed.add_field(name="**!stats**", value="Outputs the stats of a given item(weapon, armor, etc)", inline=False)
-        embed.add_field(name="**!repair**", value="Outputs the cost to repair an item", inline=False)
-        embed.add_field(name="**!binds**", value="Displays all supported commands to bind", inline=False)
+                                                         "and ore type", inline=True)
+        embed.add_field(name="**!smelting**", value="Shows smelting data for a given item", inline=True)
+        embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=True),
+        embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=True),
+        embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=True)
+        embed.add_field(name="**!stats**", value="Outputs the stats of a given item(weapon, armor, etc)", inline=True)
+        embed.add_field(name="**!repair**", value="Outputs the cost to repair an item", inline=True)
+        embed.add_field(name="**!binds**", value="Displays all supported commands to bind", inline=True)
         embed.add_field(name="**!gamble**", value="Displays bandit camp wheel percentages and calculates the "
-                                                  "chance of a certain outcome occuring", inline=False)
+                                                  "chance of a certain outcome occuring", inline=True)
         embed.add_field(name="**!skinlist**", value="Displays a list of skins for a certain item"
-                                                    " for a certain item", inline=False)
+                                                    " for a certain item", inline=True)
         embed.add_field(name="**!raidcalc**", value="Calculates how many rockets/c4/etc to get through a certain"
-                                                    " amount of walls/doors", inline=False)
+                                                    " amount of walls/doors", inline=True)
         embed.add_field(name="**!durability**", value="Displays how much of various tools/explosives it takes"
-                                                      " to get through a certain building item", inline=False)
+                                                      " to get through a certain building item", inline=True)
         embed.add_field(name="**!experiment**", value="Displays experiment tables of the tier 1, 2, and 3 workbenches",
-                        inline=False)
+                        inline=True)
         await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                    '**![commandName]**\n', embed=embed)
 
@@ -906,29 +980,30 @@ async def on_message(message):
                 workbench_table = workbench_html.find('div', {"data-name": "experiment"}).find('tbody')
                 items = workbench_table.find_all('tr')
                 table_string = ''
+                str_items = []
                 num_items = 0
+                # Add all items found to a list and use it to get a formatted string to display
                 for item in items:
-                    table_string += ' '.join(item.find('a').text.split()[:-1]) + '\n'
+                    temp_str = ' '.join(item.find('a').text.split()[:-1])
+                    str_items.append(temp_str)
                     num_items += 1
+
+                table_string = format_text(str_items, 5)
+
                 await message.channel.send('Displaying the experiment table for **workbench level ' + str(tier)
                                            + '**:\n')
-                # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
-                if len(table_string) > 2000:
-                    # Split the message every 1900 character, preserving formatting
-                    messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
-                    # Once the message has been split into a list, iterate through and post it as code to make it look
-                    # halfway decent
-                    for msg in messages:
-                        await message.channel.send('```' + msg + '```')
-                    await message.channel.send('The chance of getting one item is 1 in ' + str(num_items) + ' or '
-                                               + '{0:.2f}'.format((1 / num_items) * 100) + '%')
-                else:
-                    await message.channel.send('```' + table_string + '```' + 'The chance of getting one item is 1 in '
-                                               + str(num_items) + ' or ' + '{0:.2f}'.format(
-                        (1 / num_items) * 100) + '%')
+
+                # Split the message every 1900 character, preserving formatting in case the message is too long
+                messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
+                # Display all messages in the list 'messages'
+                for msg in messages:
+                    await message.channel.send('```' + msg + '```')
+                await message.channel.send('The chance of getting one item is 1 in ' + str(num_items) + ' or '
+                                           + '{0:.2f}'.format((1 / num_items) * 100) + '%')
             else:
                 await message.channel.send('Please enter a valid number')
                 return
+
     elif message.content.lower().startswith('!raidcalc'):
         # Split the input command into a list
         args = message.content.lower().split()
@@ -1543,8 +1618,7 @@ async def on_message(message):
         title, desc = get_news('https://rustafied.com')
         # Embed a link to the site with the retrieved title and description
         embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
-        await message.channel.send('This will be used in the future to make a discord post whenever Rustafied updates '
-                                   'with news', embed=embed)
+        await message.channel.send('Here is the newest Rustafied article:', embed=embed)
 
     # Outputs a link to of the newest rust devblog. I am using an xml parser to scrape the rss feed as the
     # website was JS rendered and I could not get selerium/pyqt/anything to return all of the html that I needed
@@ -1632,25 +1706,22 @@ async def on_message(message):
                     await message.channel.send(best_container.text + ' has no drop table. If this was not the item you'
                                                                      ' were looking for enter a more specific name')
                     return
-
             sorted_text = sorted((key, value) for (value, key) in table_text.items())
+            str_items = []
 
-            table_string = ''
             for text in sorted_text:
-                table_string += str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%\n'
+                temp_str = str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%'
+                str_items.append(temp_str)
+
+            table_string = format_text(str_items, 3)
             await message.channel.send('Displaying drop table for **' + best_container.text + '**:\n')
             # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
-            if len(table_string) > 2000:
-                # Split the message every 1900 character, preserving formatting
-                messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
-                # Once the message has been split into a list, iterate through and post it as code to make it look
-                # halfway decent
-                for msg in messages:
-                    await message.channel.send('```' + msg + '```')
-                await message.channel.send('Discord is not hot when it comes to string formatting! Sauce them'
-                                           ' an angry letter if u think this looks like hot dog')
-            else:
-                await message.channel.send('```' + table_string + '```')
+            # Split the message every 1800 characters, preserving formatting
+            messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
+            # Once the message has been split into a list, iterate through and post it as code to make it look
+            # halfway decent
+            for msg in messages:
+                await message.channel.send('```' + msg + '```')
 
     # Posts a random picture from a given folder
     elif message.content.lower().startswith('!campic'):
@@ -1700,22 +1771,20 @@ async def on_message(message):
                     return
             # Once we get all of the drop data, sort it based on drop percentage
             sorted_text = sorted((key, value) for (value, key) in table_text.items())
-            table_string = ''
+            str_items = []
             for text in sorted_text:
-                table_string += str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%\n'
+                str_items.append(str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%')
+
+            table_string = format_text(str_items, 3)
+
             await message.channel.send('Displaying drop percentages for **' + best_item.text + '**:\n')
             # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
-            if len(table_string) > 2000:
-                # Split the message every 1900 character, preserving formatting
-                messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
-                # Once the message has been split into a list, iterate through and post it as code to make it look
-                # halfway decent
-                for msg in messages:
-                    await message.channel.send('```' + msg + '```')
-                await message.channel.send('Discord is not hot when it comes to string formatting! Sauce them'
-                                           ' an angry letter if u think this looks like hot dog')
-            else:
-                await message.channel.send('```' + table_string + '```')
+            # Split the message every 1900 character, preserving formatting
+            messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
+            # Once the message has been split into a list, iterate through and post it as code to make it look
+            # halfway decent
+            for msg in messages:
+                await message.channel.send('```' + msg + '```')
 
     # Output general smelting info about a certain item.
     elif message.content.lower().startswith('!smelting'):
@@ -1798,16 +1867,34 @@ async def on_message(message):
             # Get the stats table from the corresponding item's info page
             stats_html = get_html(item_url)
             stats_table = stats_html.find('table', {"class": "info-table"})
+            embed = discord.Embed()
+            item_img = "https://www." + stats_html.find('img', {"class": "main-icon"})['src'][2:]
+            embed.set_image(url=item_img)
             # If the html returned is null, then there are no stats for the item
             if stats_table is None:
-                await message.channel.send('There are no stats for ' + best_item.text)
+                pass
             # If the item has stats, then output all rows into an embed to display to the user
             else:
                 rows = stats_table.find_all('tr')
-                embed = discord.Embed()
                 for row in rows:
                     data = row.find_all('td')
-                    embed.add_field(name=data[0].text, value=data[1].text, inline=True)
+                    embed.add_field(name=data[0].text, value=data[1].text, inline=False)
+
+            # After getting item stats, get stats for despawn time, stack size, etc
+            info_table = stats_html.find('table', {"class": "stats-table"})
+            # If there is no data in the info table, check if there is any info in the stats table. If not,
+            # then there in no info for the item. If there is data for only the stats table, then display it
+            if info_table is None:
+                if stats_table is None:
+                    await message.channel.send('There are no stats for ' + best_item)
+                else:
+                    await message.channel.send('Displaying item stats for **' + best_item.text + '**:', embed=embed)
+            # If we find data, add it to the embed and display it
+            else:
+                rows = info_table.find_all('tr')
+                for row in rows:
+                    data = row.find_all('td')
+                    embed.add_field(name=data[0].text, value=data[1].text, inline=False)
                 await message.channel.send('Displaying item stats for **' + best_item.text + '**:', embed=embed)
 
     elif message.content.lower().startswith('!repair'):
@@ -1941,41 +2028,14 @@ async def on_message(message):
             cursor.execute(sql)
             largest_string = cursor.fetchall()[0]
 
+            img_list = gen_images(items, largest_string[0])
+
             # For each item, get its data and display it as an image
             await message.channel.send('Item store: ' + '<https://store.steampowered.com/itemstore/252490/browse/?'
                                                         'filter=All>\nPrices on the far right are predicted after'
                                                         ' 1 year on the market.')
-            for item in items:
-                # Get the item's data
-                item_name = item.get_name()
-                item_price = item.get_price()
-                predicted_price = item.get_predicted_price()
-                img_src = item.get_img_url()
-                img_resp = requests.get(img_src)
-                skin_img = Image.open(BytesIO(img_resp.content))
 
-                # Set icon size and font type/size
-                icon_size = 64, 64
-                fnt = ImageFont.truetype("whitneysemibold.ttf", 20)
-                # Set the image height and width. The height is the height of the icon and width is
-                # set to the longest string size
-                img_height = icon_size[0]
-                img_width = icon_size[1] + (fnt.getsize('\t' + largest_string[0] + '\t\t$99.99\t\t$99.99')[0])
-                img = Image.new(mode="RGBA", size=(img_width, img_height), color=(0, 0, 0, 0))
-
-                # Draw skin's image on a transparent image and write the item's data as text
-                skin_img.thumbnail(icon_size, Image.ANTIALIAS)
-                img.paste(skin_img, (0, 0), skin_img)
-                d = ImageDraw.Draw(img)
-                paste_str = '\t' + item_name + '\t\t' + str(item_price) + '\t\t$' + str(predicted_price)
-
-                # Right justify the text so it looks nicer
-                text_length = fnt.getsize(paste_str)[0]
-                paste_x = img_width - text_length
-
-                d.text((paste_x, ((icon_size[1] // 2) - 20)), paste_str, font=fnt,
-                       fill=(255, 255, 255))
-
+            for img in img_list:
                 # Upload the files 1 by 1. Using the 'files' argument only uploaded the last file
                 img.save('temp.png')
                 with open('temp.png', 'rb') as f:
@@ -2023,7 +2083,19 @@ async def on_message(message):
 
     # Get status of all servers the bot depends on with get_status
     elif message.content.lower().startswith('!status'):
-        await message.channel.send(get_status())
+        statuses = get_status()
+        embed = discord.Embed()
+        # Display statuses in an embed
+        for status in statuses:
+            total_status = statuses[status] + ' ' + status
+            embed.add_field(name=total_status, value="\n\u200b", inline=False)
+
+        await message.channel.send('Displaying staus of all dependent servers:', embed=embed)
+
+    elif message.content.lower().startswith('!test'):
+        em = discord.Embed()
+        em.set_image(url='https://cdn.discordapp.com/attachments/684062237882580994/726053057506312263/test.png')
+        await message.channel.send('Test', embed=em)
 
 
 client.loop.create_task(check())
