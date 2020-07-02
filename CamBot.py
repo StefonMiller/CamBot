@@ -500,7 +500,7 @@ def get_skin_prices():
 # @Param msg: Text to tweet
 # @Param pic: Optional picture to tweet
 # @Return: Status of tweet submission
-def tweet(msg, pic):
+def tweet(msg, pic=None):
     # Authorize and connect to API with our API keys
     auth = tweepy.OAuthHandler(keys[1], keys[2])
     auth.set_access_token(keys[3], keys[4])
@@ -786,11 +786,11 @@ def recycle(search_term, num_items):
                 recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
             elif '%' in recycle_quantity:
                 recycle_percent = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items // 100
-                recycle_text += '\tYou should expect to get ' + str(
+                recycle_text += '\t• You should expect to get ' + str(
                     recycle_percent) + ' ' + recycle_name + '(' + recycle_quantity + ' chance for each item)\n'
             else:
                 recycle_quantity = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items
-                recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
+                recycle_text += '\t• ' + str(recycle_quantity) + ' ' + recycle_name + '\n'
 
         return recycle_text
 
@@ -1075,6 +1075,7 @@ async def on_message(message):
                 # These two variables will be used to calculate the minimum sulfur for the current building item
                 min_sulfur = 999999
                 lowest_explosive = ''
+                embed = discord.Embed()
                 # Iterate through the list of all explosives and only get the data of the ones we are looking for
                 for explosive_row in all_explosives:
                     flag = True
@@ -1091,8 +1092,8 @@ async def on_message(message):
                                 explosive_name == 'Satchel Charge' or explosive_name == 'Explosive 5.56 Rifle Ammo':
                             curr_sulfur = (num_building * int(''.join(filter(str.isdigit, explosive[5].text))))
                             # Get the item name, quantity, and sulfur cost and append them to explosive_cost
-                            curr_cost = '\n\t\t' + str(num_building * int(explosive[2].text)) + ' ' + explosive_name + \
-                                        '(**' + str(curr_sulfur) + ' sulfur**)'
+                            curr_cost = '\n\t• ' + str(num_building * int(explosive[2].text)) + ' ' + explosive_name \
+                                        + '(**' + str(curr_sulfur) + ' sulfur**)'
                             explosive_cost += curr_cost
                             if curr_sulfur < min_sulfur:
                                 min_sulfur = curr_sulfur
@@ -1117,7 +1118,7 @@ async def on_message(message):
         args = message.content.lower().split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
-            await message.channel.send('This command displays aggregate skin data. Use **!skindata -c, -e, -lp, or '
+            await message.channel.send('This command displays aggregate skin data. Use **!skinlist -c, -e, -lp, or '
                                        '-mp [itemType]** for the top 10 cheapest, most expensive, least profitable, or'
                                        ' most profitable skins for that item. Additionally, you can use these without '
                                        'any item type for the top 10 cheapest/etc skins for all items\n '
@@ -1418,17 +1419,20 @@ async def on_message(message):
                                                                         'servername]**')
             # If there is a server argument, add any arguments after !serverpop to the server name
         else:
-            serv_name = ""
+            server_name = ""
             for i in args:
                 if i == args[0]:
                     pass
                 else:
-                    if serv_name == "":
-                        serv_name = i.capitalize()
+                    if server_name == "":
+                        server_name = i.capitalize()
                     else:
-                        serv_name = serv_name + " " + i.capitalize()
+                        server_name = server_name + " " + i.capitalize()
             # Navigate to the specific server search requested
-            bm_url = 'https://battlemetrics.com/servers/rust?q=' + serv_name + '&sort=rank'
+            server_http = server_name.replace(' ', '%20')
+            server_http = server_http.replace('&', '%26')
+            server_http = server_http.replace('?', '%3F')
+            bm_url = 'https://battlemetrics.com/servers/rust?q=' + server_http + '&sort=rank'
             bm_html = get_html(bm_url)
             # Find the table containing the search results
             server_table = bm_html.find('table', {"class": "css-1yjs8zt"})
@@ -1441,7 +1445,7 @@ async def on_message(message):
                 if i.find('a'):
                     servers.append(i.find('a'))
             # Find the best match given the new list of servers and all search terms
-            best_match = get_best_match(servers, serv_name)
+            best_match = get_best_match(servers, server_name)
             # If get_best_match returns an empty string, there was no matching server
             if best_match == '':
                 await message.channel.send('Server not found')
@@ -1833,7 +1837,7 @@ async def on_message(message):
             best_smelt_table = best_smelt_html.find('div', {"data-name": "smelting"}).find('table', {
                 "class": "table w100 olive"}).find('tbody')
             rows = best_smelt_table.find_all('tr')
-            table_text = 'Displaying smelting stats for **' + best_smelt.text + '**```'
+            table_text = 'Displaying smelting stats for the **' + best_smelt.text + '**```'
             for row in rows:
                 cols = row.find_all('a')
                 # If there are only 2 entries in the row, we are at the end of the table
