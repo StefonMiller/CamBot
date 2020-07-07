@@ -263,14 +263,16 @@ async def update_items(channels, items, total_price):
     else:
         # Get the longest item name in the database
         sql = "SELECT skin_name FROM skin ORDER BY LENGTH(skin_name) DESC LIMIT 1;"
+        print('updating items...')
         cursor.execute(sql)
         largest_string = cursor.fetchall()[0]
 
         img_list = gen_images(items, largest_string[0])
 
         for channel in channels:
-            await channel.send('The Rust item store has updated with new items: ' \
-                               + 'https://store.steampowered.com/itemstore/252490/browse/?filter=All' + '\n\n')
+            await channel.send('Item store: ' + '<https://store.steampowered.com/itemstore/252490/browse/?'
+                                                        'filter=All>\nPrices on the far right are predicted after'
+                                                        ' 1 year on the market.')
             for img in img_list:
                 # Upload the files 1 by 1. Using the 'files' argument only uploaded the last file
                 img.save('temp.png')
@@ -565,17 +567,22 @@ def get_news(news_url):
 def get_rust_items(item_url):
     item_html = get_html(item_url)
     item_divs = item_html.find_all('div', {"class": "item_def_grid_item"})
-
     # Check if the items we are attempting to get data on are cached or not
     first_item_name = item_divs[0].find('div', {"class": "item_def_name ellipsis"}).text
     # Open the file containing the cached item data and get the first item name
     with open("C:/Users/Stefon/PycharmProjects/CamBot/cached_items.txt") as file:
         cache = file.read().splitlines()
         file.close()
+    # Get the first item name from the cache. If cache is null, simply pass as our next if statement will check if it
+    # is null
+    try:
+        f_name = cache[0].split(',')[0]
+    except Exception as e:
+        pass
 
-    if not cache:
+    if not cache or (f_name != first_item_name):
         # If the data we are looking up is not cached, then look everything up and add it to the text file
-        print('No match')
+        print('Items not cached...')
         with open("C:/Users/Stefon/PycharmProjects/CamBot/cached_items.txt", 'w') as f:
             item_list = []
             total_price = 0
@@ -597,53 +604,22 @@ def get_rust_items(item_url):
                 img_src = img_html.find('img', {"class": "workshop_preview_image"})['src']
                 img_src = img_src.replace('65f', '360f')
                 item_list.append(Skin(item_name, item_price, item_type, predicted_price, img_src))
-                write_text = item_name + ',' + item_price + ',' + item_type + ',' + predicted_price + ',' + \
-                             img_src + '\n'
+                temp_arr = [item_name, item_price, item_type, predicted_price, img_src]
+                write_text = ','.join(temp_arr) + '\n'
                 f.write(write_text)
             f.close()
 
         return item_list, total_price
     else:
-        f_name = cache[0].split(',')[0]
-
+        print('Data cached, skipping item regeneration...')
         # If the cached name is the same as the name we are looking up, then we do not need to scrape the item store
-        if f_name == first_item_name:
-            item_list = []
-            total_price = 0
-            for line in cache:
-                data = line.split(',')
-                total_price += float(data[1].replace('$', ''))
-                item_list.append(Skin(data[0], data[1], data[2], data[3], data[4]))
-            return item_list, total_price
-        else:
-            # If the data we are looking up is not cached, then look everything up and add it to the text file
-            print('No match')
-            with open("C:/Users/Stefon/PycharmProjects/CamBot/cached_items.txt", 'w') as f:
-                item_list = []
-                total_price = 0
-                for i in item_divs:
-                    # Get div containing item name and store its text attribute
-                    item_name_div = i.find('div', {"class": "item_def_name ellipsis"})
-                    item_name = item_name_div.text
-                    item_type = i.find('a')['href']
-                    # Get div containing item price and store its text attribute
-                    item_price_div = i.find('div', {"class": "item_def_price"})
-                    # Convert the price to a double for addition and store it in the total price var
-                    item_price = "".join(i for i in item_price_div.text if 126 > ord(i) > 31)
-                    item_price_in_double = float(item_price[1:])
-                    total_price += item_price_in_double
-                    # Get the predicted price of the item using the skinML module
-                    predicted_price = skinml.get_predicted_price(item_type)
-                    # Get the url of the item's image
-                    img_html = get_html(item_type)
-                    img_src = img_html.find('img', {"class": "workshop_preview_image"})['src']
-                    img_src = img_src.replace('65f', '360f')
-                    item_list.append(Skin(item_name, item_price, item_type, predicted_price, img_src))
-                    write_text = ','.join(item_name, item_price, item_type, predicted_price, img_src) + '\n'
-                    f.write(write_text)
-                f.close()
-
-            return item_list, total_price
+        item_list = []
+        total_price = 0
+        for line in cache:
+            data = line.split(',')
+            total_price += float(data[1].replace('$', ''))
+            item_list.append(Skin(data[0], data[1], data[2], data[3], data[4]))
+        return item_list, total_price
 
 
 # Gets an item from the RustLabs item page with name closest matching item_name
@@ -909,6 +885,26 @@ async def on_voice_state_update(member, before, after):
             except Exception as e:
                 print('SQUADDIES IS NOT A TEXT CHANNEL NOT HOTTTT')
 
+
+@client.event
+async def on_raw_reaction_add(reaction):
+    if reaction.user_id == client.user.id:
+        pass
+    else:
+        channel = await client.fetch_channel(reaction.channel_id)
+        msg = await channel.fetch_message(reaction.message_id)
+        if msg:
+            if str(reaction.emoji) == '◀':
+                await msg.remove_reaction('◀', reaction.member)
+                embed = discord.Embed(description="There should be reactions to this message. When you react to them, the text should change...")
+                await msg.edit(embed=embed)
+
+            elif str(reaction.emoji) == '▶':
+                await msg.remove_reaction('▶', reaction.member)
+                embed = discord.Embed(description="To this")
+                await msg.edit(embed=embed)
+            else:
+                pass
 
 @client.event
 async def on_message(message):
@@ -1288,7 +1284,7 @@ async def on_message(message):
             data, best_skin = get_skins_of_type(skin_type)
             # Theoretically, there should always be a match but if there isn't exit the command and let the user know
             if not data:
-                await message.channel.send('No skin data found for the given skin. Use **!skindata [skinname]**\n')
+                await message.channel.send('No skin data found for the given skin. Use **!skinlist [skinname]**\n')
                 return
             else:
                 desc = ''
@@ -1602,16 +1598,16 @@ async def on_message(message):
 
             # Dipslay the data and an image for the given item
             img_div = skin_html.find('div', {"class": "market_listing_largeimage"}).find('img')['src']
-            embed = discord.Embed()
-            embed.add_field(name="Item name", value=name, inline=False)
-            embed.add_field(name="Release date", value=skin_initial_date, inline=False)
-            embed.add_field(name="Initial price", value='$' + str(skin_initial_price), inline=False)
-            embed.add_field(name="Current price", value='$' + str(current_price), inline=False)
-            embed.add_field(name="Percent change", value=str(percent_change) + '%', inline=False)
-            embed.add_field(name='Skin for:', value=skin_type, inline=False)
-            embed.add_field(name='Steam market link', value=skin_url, inline=False)
-            embed.set_image(url=img_div)
-            await message.channel.send('Displaying skin data for **' + name + '**', embed=embed)
+            title = 'Displaying skin data for ' + '[' + name + ']' + '(' + skin_url + ')'
+            embed = discord.Embed(description=title, timestamp=datetime.utcfromtimestamp(1594122335))
+            embed.set_thumbnail(url=img_div)
+            embed.add_field(name="Release date", value=skin_initial_date, inline=True)
+            embed.add_field(name="Initial price", value='$' + str(skin_initial_price), inline=True)
+            embed.add_field(name="Current price", value='$' + str(current_price), inline=True)
+            embed.add_field(name="Price difference", value='$' + str(current_price-skin_initial_price), inline=True)
+            embed.add_field(name="Percent change", value=str(percent_change) + '%', inline=True)
+            embed.add_field(name='Skin for:', value=skin_type, inline=True)
+            await message.channel.send(embed=embed)
 
 
 
@@ -1661,6 +1657,7 @@ async def on_message(message):
             embed.add_field(name="Helicopter Crate", value="\n\u200b", inline=True)
             embed.add_field(name="Oil Rig Scientist", value="\n\u200b", inline=True)
             embed.add_field(name="Tool Box", value="\n\u200b", inline=True)
+            embed.add_field(name="Vehicle Parts Toolbox", value="\n\u200b", inline=True)
             await message.channel.send('This command will display all items dropped from any of the following loot'
                                        ' sources along with their respective drop percentages:\n', embed=embed)
         # If the user enters a table name, search for it
@@ -1737,7 +1734,6 @@ async def on_message(message):
 
         # Select a random filename from the list and upload the corresponding image
         rand_pic = random.choice(pics)
-        print(img_path + rand_pic)
         file = discord.File(img_path + rand_pic, filename=rand_pic)
         await message.channel.send(file=file)
 
@@ -1796,11 +1792,11 @@ async def on_message(message):
         # Print out a command description if the user doesn't enter a second argument
         if len(args) == 1:
             embed = discord.Embed()
-            embed.add_field(name="Barbeque", value="\n\u200b", inline=False)
-            embed.add_field(name="Camp Fire", value="\n\u200b", inline=False)
-            embed.add_field(name="Furnace", value="\n\u200b", inline=False)
-            embed.add_field(name="Large Furnace", value="\n\u200b", inline=False)
-            embed.add_field(name="Small Oil Refinery", value="\n\u200b", inline=False)
+            embed.add_field(name="Barbeque", value="\n\u200b", inline=True)
+            embed.add_field(name="Camp Fire", value="\n\u200b", inline=True)
+            embed.add_field(name="Furnace", value="\n\u200b", inline=True)
+            embed.add_field(name="Large Furnace", value="\n\u200b", inline=True)
+            embed.add_field(name="Small Oil Refinery", value="\n\u200b", inline=True)
             await message.channel.send('This command will display smelting data for a given item with '
                                        '**!smelting [itemName]** \nThe following items are currently supported:',
                                        embed=embed)
@@ -1871,9 +1867,11 @@ async def on_message(message):
             # Get the stats table from the corresponding item's info page
             stats_html = get_html(item_url)
             stats_table = stats_html.find('table', {"class": "info-table"})
-            embed = discord.Embed()
+            title = 'Displaying item stats for ' + best_item.text
+            embed = discord.Embed(title=title)
             item_img = "https://www." + stats_html.find('img', {"class": "main-icon"})['src'][2:]
-            embed.set_image(url=item_img)
+            embed.set_thumbnail(url=item_img)
+
             # If the html returned is null, then there are no stats for the item
             if stats_table is None:
                 pass
@@ -1882,7 +1880,7 @@ async def on_message(message):
                 rows = stats_table.find_all('tr')
                 for row in rows:
                     data = row.find_all('td')
-                    embed.add_field(name=data[0].text, value=data[1].text, inline=False)
+                    embed.add_field(name=data[0].text, value=data[1].text, inline=True)
 
             # After getting item stats, get stats for despawn time, stack size, etc
             info_table = stats_html.find('table', {"class": "stats-table"})
@@ -1892,14 +1890,14 @@ async def on_message(message):
                 if stats_table is None:
                     await message.channel.send('There are no stats for ' + best_item)
                 else:
-                    await message.channel.send('Displaying item stats for **' + best_item.text + '**:', embed=embed)
+                    await message.channel.send(embed=embed)
             # If we find data, add it to the embed and display it
             else:
                 rows = info_table.find_all('tr')
                 for row in rows:
                     data = row.find_all('td')
-                    embed.add_field(name=data[0].text, value=data[1].text, inline=False)
-                await message.channel.send('Displaying item stats for **' + best_item.text + '**:', embed=embed)
+                    embed.add_field(name=data[0].text, value=data[1].text, inline=True)
+                await message.channel.send(embed=embed)
 
     elif message.content.lower().startswith('!repair'):
         args = message.content.lower().split()
@@ -2047,6 +2045,7 @@ async def on_message(message):
                 await message.channel.send(file=file)
 
 
+
     # Gets the recipe for a certain item
     elif message.content.lower().startswith('!craftcalc'):
         craft_name = []
@@ -2088,13 +2087,13 @@ async def on_message(message):
     # Get status of all servers the bot depends on with get_status
     elif message.content.lower().startswith('!status'):
         statuses = get_status()
-        embed = discord.Embed()
+        embed = discord.Embed(title='Displaying staus of all dependent servers:')
         # Display statuses in an embed
         for status in statuses:
             total_status = statuses[status] + ' ' + status
             embed.add_field(name=total_status, value="\n\u200b", inline=False)
 
-        await message.channel.send('Displaying staus of all dependent servers:', embed=embed)
+        await message.channel.send(embed=embed)
 
     elif message.content.lower().startswith('!test'):
         em = discord.Embed()
