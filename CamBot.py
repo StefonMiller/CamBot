@@ -261,24 +261,30 @@ async def update_items(channels, items, total_price):
         pass
     # If we have entries, format and display them
     else:
-        # Get the longest item name in the database
-        sql = "SELECT skin_name FROM skin ORDER BY LENGTH(skin_name) DESC LIMIT 1;"
-        print('updating items...')
-        cursor.execute(sql)
-        largest_string = cursor.fetchall()[0]
-
-        img_list = gen_images(items, largest_string[0])
-
+        # Display the first item we get in an embed
+        embed = discord.Embed(title=items[0].n,
+                              url='https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+        embed.set_thumbnail(url=items[0].im)
+        footer_text = 'Page 1/' + str(len(items))
+        embed.set_footer(text=footer_text)
+        embed.add_field(name='Item price', value=items[0].p, inline=True)
+        embed.add_field(name='Predicted price(1yr)', value=items[0].pr, inline=True)
         for channel in channels:
-            await channel.send('Item store: ' + '<https://store.steampowered.com/itemstore/252490/browse/?'
-                                                        'filter=All>\nPrices on the far right are predicted after'
-                                                        ' 1 year on the market.')
-            for img in img_list:
-                # Upload the files 1 by 1. Using the 'files' argument only uploaded the last file
-                img.save('temp.png')
-                with open('temp.png', 'rb') as f:
-                    file = discord.File(f)
-                await channel.send(file=file)
+            msg = await channel.send(embed=embed)
+            # Insert all other items into the SQL database with corresponding message and channel ids
+            for item in items:
+                try:
+                    sql = "INSERT INTO messages (message_id, channel_id, item_name, starting_price, " \
+                          "predicted_price, store_url) VALUES(%s, %s, %s, %s, %s, %s)"
+                    val = (msg.id, channel.id, item.n, item.p, item.pr, item.im)
+                    cursor.execute(sql, val)
+                    connection.commit()
+                    print('Successfully inserted ' + item.n)
+                except Exception as e:
+                    print('Error, skipping ' + item.n + '...' + str(e))
+            # React to the message to set up navigation
+            await msg.add_reaction('◀')
+            await msg.add_reaction('▶')
     # Send out a tweet when the item store updates
     tweet('The Rust item store has updated with new items: https://store.steampowered.com/itemstore/252490/'
           'browse/?filter=All')
@@ -344,13 +350,13 @@ def get_status():
     # Fill an array with each server we want to test
     import requests
     server_names = ['https://www.battlemetrics.com', 'https://rust.facepunch.com/blog/', 'https://www.rustlabs.com/',
-                  'https://rustafied.com/']
+                    'https://rustafied.com/']
 
     server_dict = {}
     for server in server_names:
         connection_status = requests.head(server)
         if connection_status.status_code == 200 or 301:
-            server_dict[server] = 	'🟢'
+            server_dict[server] = '🟢'
         else:
             server_dict[server] = '🔴'
     return server_dict
@@ -826,6 +832,136 @@ def format_text(str_list, cols):
     # Join all lines and return the resulting string
     return '\n'.join(lines)
 
+
+# Generates all emojis needed for cambot
+def gen_emojis():
+    # Create a dictionary to store the emojis
+    emoji_dict = {}
+    # Images needed for the emojis are stored in the 'img' folder
+    for f in os.listdir('img'):
+        img_path = os.path.join('img', f)
+        # Add the name of each image and the image itself as a bytes stream to the dictionary
+        image_name = f.split('.')[0]
+        with open(img_path, 'rb') as image:
+            img_read = image.read()
+            b = bytearray(img_read)
+            emoji_dict[image_name] = b
+
+    return emoji_dict
+
+
+# Checks if an item can be represented by an emoji
+# @Param guild_emojis: All emojis in the current server
+# @Param item_str: Item we are checking
+# @Return emoji: Corresponding emoji if found, None if not
+def check_emoji(guild_emojis, item_str):
+    for emoji in guild_emojis:
+        emoji_name = emoji.name.split('_')[1:]
+        emoji_name = ' '.join(emoji_name)
+        if emoji_name == item_str.lower():
+            return emoji
+    return None
+
+
+# Checks if our emojis are already in the guild
+# @Param guild_emojis: All emojis in the current guild
+# @Return missing_emojis: All of CamBots emojis not in the server.
+def check_guild_emojis(guild_emojis):
+    # Get all emote names from the image files in the 'img' folder
+    missing_emoji_names = []
+    for f in os.listdir('img'):
+        img_name = f.split('.')[0].replace('_', ' ')
+        missing_emoji_names.append(img_name.lower())
+
+    # Create a copy of the missing_emojis array to remove items from
+    missing_emojis = missing_emoji_names.copy()
+
+    # Go through all of cambot's emotes and check if they are already in the server
+    for cam_emoji_name in missing_emoji_names:
+        for guild_emoji in guild_emojis:
+            guild_emoji_name = guild_emoji.name.split('_')[1:]
+            guild_emoji_name = ' '.join(guild_emoji_name)
+            # If the emotes are already in the server's emote list, remove them from the missing emoji list
+            if guild_emoji_name == cam_emoji_name:
+                missing_emojis.remove(cam_emoji_name)
+
+    return missing_emojis
+
+
+# Adds all missing emojis to the corresponding guild
+# @Param guild: Guild we are adding emojis to
+# @Return: String status of emoji addition
+async def add_emojis(guild):
+    # Get all missing emojis in the current guild
+    guild_emojis = guild.emojis
+    missing_emojis = check_guild_emojis(guild_emojis)
+
+    # Get the number of free emoji slots for the guild
+    available_emojis = guild.emoji_limit - len(guild_emojis)
+
+    # If there are no missing emojis, let the user know they have all of cambots emojis
+    if not missing_emojis:
+        return 'All emojis are already in the server'
+    else:
+        # If there is space for the emojis, generate them
+        if available_emojis > len(missing_emojis):
+            emojis = gen_emojis()
+            emoji_names = emojis.keys()
+            # Generate all emotes in the missing_emojis list
+            for name in emoji_names:
+                temp_name = name.replace('_', ' ')
+                if temp_name in missing_emojis:
+                    final_name = 'cambot_' + name
+                    print('Creating emoji with name ' + final_name)
+                    await guild.create_custom_emoji(name=final_name, image=emojis[name])
+
+            return 'Successfully created all emojis'
+        # If there isn't enough space, tell the user to remove x amount of emotes
+        else:
+            return 'You do not have enough emoji slots to add the emotes. Remove ' + str(len(missing_emojis)) \
+                   + ' emote(s) and try again'
+
+
+# Removes all of cambot's emojis from the current guild
+# @Param guild: Guild to remove emojis from
+# @Return: String representing the status of the removal
+async def remove_emojis(guild):
+    emojis = guild.emojis
+
+    # Get emoji names for all emojis added by the bot
+    img_names = []
+    for f in os.listdir('img'):
+        img_names.append(f.split('.')[0])
+
+    for emoji in emojis:
+        # Remove the first word before an underscore and check if the resulting name is in the name of images
+        temp_name = emoji.name.split('_')[1:]
+        temp_name = '_'.join(temp_name)
+        # If the emoji is one generated by the bot, remove it.
+        if temp_name in img_names:
+            print('Deleting emoji ' + temp_name)
+            await emoji.delete()
+    return 'All emojis from CamBot have been removed successfully'
+
+
+# Generates an embed for Rust skins
+# @Param curr_position: Current position in the list
+# @Param pages: All items returned from an SQL query getting items associated with a message
+def gen_embed(curr_position, pages):
+    # Generate embed with title and data corresponding to the given skin from the SQL server
+    embed = discord.Embed(title=pages[curr_position][2],
+                          url='https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+    embed.set_thumbnail(url=pages[curr_position][5])
+    if curr_position == -1:
+        footer_text = 'Page 12/' + str(len(pages))
+    else:
+        footer_text = 'Page ' + str(curr_position + 1) + '/' + str(len(pages))
+    embed.set_footer(text=footer_text)
+    embed.add_field(name='Item price', value=pages[curr_position][3], inline=True)
+    embed.add_field(name='Predicted price(1yr)', value=pages[curr_position][4], inline=True)
+    return embed
+
+
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
@@ -888,23 +1024,58 @@ async def on_voice_state_update(member, before, after):
 
 @client.event
 async def on_raw_reaction_add(reaction):
+    # Omit the bot's reactions
     if reaction.user_id == client.user.id:
         pass
     else:
+        # Get the channel and message id of the reaction
         channel = await client.fetch_channel(reaction.channel_id)
         msg = await channel.fetch_message(reaction.message_id)
         if msg:
-            if str(reaction.emoji) == '◀':
-                await msg.remove_reaction('◀', reaction.member)
-                embed = discord.Embed(description="There should be reactions to this message. When you react to them, the text should change...")
-                await msg.edit(embed=embed)
+            # Query the SQL server for the above channel and message ids. This is so older messages can also be
+            # navigated when reacted to.
+            sql = "SELECT * FROM messages WHERE message_id = %s AND channel_id = %s"
+            val = (msg.id, channel.id,)
+            cursor.execute(sql, val)
+            pages = cursor.fetchall()
+            # If the message exists in the database, proceed
+            if pages is not None:
+                # Get the current item, which is the currently displayed info in the embed
+                curr_item = msg.embeds[0].title
+                temp_arr = [i[2] for i in pages]
+                try:
+                    # Get the index of the current item
+                    curr_position = temp_arr.index(curr_item)
+                    # If we are going back, query the database for the item 1 index back
+                    if str(reaction.emoji) == '◀':
+                        await msg.remove_reaction('◀', reaction.member)
+                        curr_position -= 1
+                        embed = gen_embed(curr_position, pages)
+                        await msg.edit(embed=embed)
+                    # If we are going forward, query the database for the item 1 index forward
+                    elif str(reaction.emoji) == '▶':
+                        await msg.remove_reaction('▶', reaction.member)
+                        # Avoid overflow
+                        if curr_position >= (len(pages) - 1):
+                            curr_position = 0
+                        else:
+                            curr_position += 1
+                        embed = gen_embed(curr_position, pages)
+                        await msg.edit(embed=embed)
+                    else:
+                        pass
+                except ValueError as e:
+                    print('Value Error' + str(e))
+                    pass
 
-            elif str(reaction.emoji) == '▶':
-                await msg.remove_reaction('▶', reaction.member)
-                embed = discord.Embed(description="To this")
-                await msg.edit(embed=embed)
-            else:
-                pass
+
+@client.event
+async def on_guild_join(guild):
+    # Initialize emojis whenever the bot is added to the guild
+    await guild.text_channels[0].send('OOOO CAMBOT COMING IN HOT SPICY DICEY. ADDING EMOJIS')
+    result = await add_emojis(guild)
+    await guild.text_channels[0].send(result)
+
 
 @client.event
 async def on_message(message):
@@ -1604,7 +1775,7 @@ async def on_message(message):
             embed.add_field(name="Release date", value=skin_initial_date, inline=True)
             embed.add_field(name="Initial price", value='$' + str(skin_initial_price), inline=True)
             embed.add_field(name="Current price", value='$' + str(current_price), inline=True)
-            embed.add_field(name="Price difference", value='$' + str(current_price-skin_initial_price), inline=True)
+            embed.add_field(name="Price difference", value='$' + str(current_price - skin_initial_price), inline=True)
             embed.add_field(name="Percent change", value=str(percent_change) + '%', inline=True)
             embed.add_field(name='Skin for:', value=skin_type, inline=True)
             await message.channel.send(embed=embed)
@@ -2024,25 +2195,30 @@ async def on_message(message):
             await message.channel.send('Rust item store is not hot!!!')
         # If we have entries, format and display them
         else:
-
-            # Get the longest item name in the database
-            sql = "SELECT skin_name FROM skin ORDER BY LENGTH(skin_name) DESC LIMIT 1;"
-            cursor.execute(sql)
-            largest_string = cursor.fetchall()[0]
-
-            img_list = gen_images(items, largest_string[0])
-
-            # For each item, get its data and display it as an image
-            await message.channel.send('Item store: ' + '<https://store.steampowered.com/itemstore/252490/browse/?'
-                                                        'filter=All>\nPrices on the far right are predicted after'
-                                                        ' 1 year on the market.')
-
-            for img in img_list:
-                # Upload the files 1 by 1. Using the 'files' argument only uploaded the last file
-                img.save('temp.png')
-                with open('temp.png', 'rb') as f:
-                    file = discord.File(f)
-                await message.channel.send(file=file)
+            # Display the first item we get in an embed
+            embed = discord.Embed(title=items[0].n,
+                                  url='https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+            embed.set_thumbnail(url=items[0].im)
+            footer_text = 'Page 1/' + str(len(items))
+            embed.set_footer(text=footer_text)
+            pr_price = '$' + str(items[0].pr)
+            embed.add_field(name='Item price', value=items[0].p, inline=True)
+            embed.add_field(name='Predicted price(1yr)', value=pr_price, inline=True)
+            msg = await message.channel.send(embed=embed)
+            # Insert all other items into the SQL database with corresponding message and channel ids
+            for item in items:
+                try:
+                    sql = "INSERT INTO messages (message_id, channel_id, item_name, starting_price, " \
+                          "predicted_price, store_url) VALUES(%s, %s, %s, %s, %s, %s)"
+                    temp_pr = '$' + str(item.pr)
+                    val = (msg.id, message.channel.id, item.n, item.p, temp_pr, item.im)
+                    cursor.execute(sql, val)
+                    connection.commit()
+                except Exception as e:
+                    pass
+            # React to the message to set up navigation
+            await msg.add_reaction('◀')
+            await msg.add_reaction('▶')
 
 
 
@@ -2100,6 +2276,13 @@ async def on_message(message):
         em.set_image(url='https://cdn.discordapp.com/attachments/684062237882580994/726053057506312263/test.png')
         await message.channel.send('Test', embed=em)
 
+    if message.content.lower().startswith('!addemojis'):
+        result = await add_emojis(message.channel.guild)
+        await message.channel.send(result)
+
+    elif message.content.lower().startswith('!removeemojis'):
+        result = await remove_emojis(message.channel.guild)
+        await message.channel.send(result)
 
 client.loop.create_task(check())
 client.run(keys[0])
