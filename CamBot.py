@@ -18,6 +18,8 @@ from fuzzywuzzy import fuzz
 import mysql.connector
 import asyncio
 import pyotp
+from tweepy import TweepError
+
 import skinml
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
@@ -268,15 +270,18 @@ async def update_items(channels, items, total_price):
         footer_text = 'Page 1/' + str(len(items))
         embed.set_footer(text=footer_text)
         embed.add_field(name='Item price', value=items[0].p, inline=True)
-        embed.add_field(name='Predicted price(1yr)', value=items[0].pr, inline=True)
+        price = '$' + items[0].pr
+        embed.add_field(name='Predicted price(1yr)', value=price, inline=True)
         for channel in channels:
+            await channel.send('The Rust item store has updated with new items')
             msg = await channel.send(embed=embed)
             # Insert all other items into the SQL database with corresponding message and channel ids
             for item in items:
                 try:
                     sql = "INSERT INTO messages (message_id, channel_id, item_name, starting_price, " \
                           "predicted_price, store_url) VALUES(%s, %s, %s, %s, %s, %s)"
-                    val = (msg.id, channel.id, item.n, item.p, item.pr, item.im)
+                    temp_pr = '$' + str(item.pr)
+                    val = (msg.id, channel.id, item.n, item.p, temp_pr, item.im)
                     cursor.execute(sql, val)
                     connection.commit()
                     print('Successfully inserted ' + item.n)
@@ -366,7 +371,7 @@ def get_status():
 # @Param item_name: name of the item to get from the database
 # @Param num_crafts: number of times to craft said item
 # @Return: Total crafting cost for the requested item * num_crafts
-def craft_calc(search_term, num_crafts):
+def craft_calc(search_term, num_crafts, guild_emojis):
     item_url = 'https://rustlabs.com/group=itemlist'
     item_html = get_html(item_url)
     # Get all item entries and use fuzzywuzzy to find the best match according to our list of search terms.
@@ -404,7 +409,10 @@ def craft_calc(search_term, num_crafts):
             else:
                 output_number = int(''.join(filter(str.isdigit, output_number.text)))
             craft_name = craft_html.find('h1').text
-            craft_string = 'Recipe for ' + str(num_crafts) + ' **' + craft_name + '**:\n'
+            craft_string = 'Recipe for ' + str(num_crafts) + ' ' + craft_name
+            embed = discord.Embed(title=craft_string)
+            item_img = "https://www." + craft_html.find('img', {"class": "main-icon"})['src'][2:]
+            embed.set_thumbnail(url=item_img)
             for ingredient in ingredients:
                 # Get quantity of materials, default to 1(if no text), if there is text strip the 'x' or 'ft' from the
                 # text and convert it to an int so we can multiply by num_crafts
@@ -413,17 +421,26 @@ def craft_calc(search_term, num_crafts):
                     pass
                 else:
                     quantity = int(''.join(filter(str.isdigit, ingredient.text)))
+                item_name = str(ingredient.find('img')['alt'])
+                item_emoji = check_emoji(guild_emojis, item_name)
                 total = int((quantity * num_crafts) / output_number)
-                craft_string += '\t' + str(total) + ' ' + str(ingredient.find('img')['alt']) + '\n'
+                if item_emoji:
+                    embed_text = str(item_emoji) + ' x' + str(total)
+                else:
+                    embed_text = item_name + ' x' + str(total)
+
+                embed.add_field(name=embed_text, value="\n\u200b", inline=False)
+
             # Check if there is a sulfur amount in the craft footer. If so, get the total sulfur amount and
             # output it. If we encounter an error, don't return any sulfur values
             try:
                 foot = craft_html.find('div', {"id": "сraft-footer"})
                 sulfur_cost = int(''.join(filter(str.isdigit, foot.find(alt="Sulfur").find_next_sibling().text)))
-                craft_string += 'Total sulfur cost: **' + str(int((num_crafts * sulfur_cost) / output_number)) + '**'
+                footer_string = 'Total sulfur cost: ' + str(int((num_crafts * sulfur_cost) / output_number))
+                embed.set_footer(text=footer_string)
             except Exception as e:
-                pass
-            return craft_string
+                print(e)
+            return embed
 
 
 # Returns the best item in i_list matching term. Used for craftcalc and serverpop commands
@@ -521,7 +538,10 @@ def tweet(msg, pic=None):
         return 'Error during authentication'
     # If there is no picture, simply tweet the message. Otherwise tweet the pic and msg
     if pic is None:
-        api.update_status(msg)
+        try:
+            api.update_status(msg)
+        except TweepError as e:
+            pass
     else:
         media = api.media_upload(pic)
         tweet = msg
@@ -604,7 +624,7 @@ def get_rust_items(item_url):
                 item_price_in_double = float(item_price[1:])
                 total_price += item_price_in_double
                 # Get the predicted price of the item using the skinML module
-                predicted_price = skinml.get_predicted_price(item_type)
+                predicted_price = '$' + str(skinml.get_predicted_price(item_type))
                 # Get the url of the item's image
                 img_html = get_html(item_type)
                 img_src = img_html.find('img', {"class": "workshop_preview_image"})['src']
@@ -732,7 +752,7 @@ def cross_reference_skins(skin_type=''):
 # @Param search_term item user is searching for
 # @Param num_items number of items the user is recycling
 # @Return the output of recycling num_items search_terms
-def recycle(search_term, num_items):
+def recycle(search_term, num_items, guild_emojis):
     item_url = 'https://rustlabs.com/group=itemlist'
     item_html = get_html(item_url)
     # Get all item entries and use fuzzywuzzy to find the best match according to our list of search terms.
@@ -759,22 +779,28 @@ def recycle(search_term, num_items):
 
         # Output the recycling data. If an output has a drop chance, output its expected value for the number of items
         # being recycled
-        recycle_text = 'Displaying recycling output for ' + str(num_items) + ' **' + recycle_name + '**:\n'
+        recycle_text = 'Displaying recycling output for ' + str(num_items) + ' ' + recycle_name
+        embed = discord.Embed(title=recycle_text)
+        item_img = "https://www." + recycle_html.find('img', {"class": "main-icon"})['src'][2:]
+        embed.set_thumbnail(url=item_img)
         for output in recycle_output:
             recycle_name = output.find('img')['alt']
+            emoji = check_emoji(guild_emojis, recycle_name)
+            # If we find an emoji, display that instead of recycle_name
+            if emoji:
+                recycle_name = emoji
             recycle_quantity = output.find('span').text
             if recycle_quantity == '':
                 recycle_quantity = 1 * num_items
-                recycle_text += '\t' + str(recycle_quantity) + ' ' + recycle_name + '\n'
+                recycle_text = str(recycle_name) + ' x' + str(recycle_quantity)
             elif '%' in recycle_quantity:
                 recycle_percent = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items // 100
-                recycle_text += '\t• You should expect to get ' + str(
-                    recycle_percent) + ' ' + recycle_name + '(' + recycle_quantity + ' chance for each item)\n'
+                recycle_text = str(recycle_name) + ' x' + str(recycle_percent) + '(' + str(recycle_quantity) + ')'
             else:
                 recycle_quantity = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items
-                recycle_text += '\t• ' + str(recycle_quantity) + ' ' + recycle_name + '\n'
-
-        return recycle_text
+                recycle_text = str(recycle_name) + ' x' + str(recycle_quantity)
+            embed.add_field(name=recycle_text, value="\n\u200b", inline=False)
+        return embed
 
 
 # Generates a list of PIL images for a list of skins from the item store
@@ -841,7 +867,9 @@ def gen_emojis():
     for f in os.listdir('img'):
         img_path = os.path.join('img', f)
         # Add the name of each image and the image itself as a bytes stream to the dictionary
-        image_name = f.split('.')[0]
+        # Remove the file extension from the name and re-join the items after splitting. We re-join the items
+        # in case there is a . in hte image name
+        image_name = ''.join(f.split('.')[:-1])
         with open(img_path, 'rb') as image:
             img_read = image.read()
             b = bytearray(img_read)
@@ -870,9 +898,10 @@ def check_guild_emojis(guild_emojis):
     # Get all emote names from the image files in the 'img' folder
     missing_emoji_names = []
     for f in os.listdir('img'):
-        img_name = f.split('.')[0].replace('_', ' ')
+        img_name = ''.join(f.split('.')[:-1]).replace('_', ' ')
         missing_emoji_names.append(img_name.lower())
 
+    print(missing_emoji_names)
     # Create a copy of the missing_emojis array to remove items from
     missing_emojis = missing_emoji_names.copy()
 
@@ -948,18 +977,39 @@ async def remove_emojis(guild):
 # @Param curr_position: Current position in the list
 # @Param pages: All items returned from an SQL query getting items associated with a message
 def gen_embed(curr_position, pages):
-    # Generate embed with title and data corresponding to the given skin from the SQL server
-    embed = discord.Embed(title=pages[curr_position][2],
-                          url='https://store.steampowered.com/itemstore/252490/browse/?filter=All')
-    embed.set_thumbnail(url=pages[curr_position][5])
-    if curr_position == -1:
-        footer_text = 'Page 12/' + str(len(pages))
+    # Determine what origin the message came from. To do this, we check what fields have data
+    if pages[0][-1]:
+        # The message origin was for a skinlist command. Format all data accordingly
+        # Generate embed with title and data corresponding to the given skin from the SQL server
+        embed = discord.Embed(title=pages[curr_position][2],
+                              url=pages[curr_position][5])
+        embed.set_thumbnail(url=pages[curr_position][7])
+        if curr_position == -1:
+            footer_text = 'Page ' + str(len(pages)) + '/' + str(len(pages))
+        else:
+            footer_text = 'Page ' + str(curr_position + 1) + '/' + str(len(pages))
+        embed.set_footer(text=footer_text)
+        # Determine if the message displayed is using percent difference or price data by checking if a
+        # percent sign is in the value field
+        if '%' in pages[curr_position][6]:
+            embed.add_field(name='Percent change', value=pages[curr_position][6], inline=True)
+        else:
+            embed.add_field(name='Price', value=pages[curr_position][6], inline=True)
+        return embed
     else:
-        footer_text = 'Page ' + str(curr_position + 1) + '/' + str(len(pages))
-    embed.set_footer(text=footer_text)
-    embed.add_field(name='Item price', value=pages[curr_position][3], inline=True)
-    embed.add_field(name='Predicted price(1yr)', value=pages[curr_position][4], inline=True)
-    return embed
+        # The message origin was for the new rust skins, format all data accordingly
+        # Generate embed with title and data corresponding to the given skin from the SQL server
+        embed = discord.Embed(title=pages[curr_position][2],
+                              url='https://store.steampowered.com/itemstore/252490/browse/?filter=All')
+        embed.set_thumbnail(url=pages[curr_position][5])
+        if curr_position == -1:
+            footer_text = 'Page ' + str(len(pages)) + '/' + str(len(pages))
+        else:
+            footer_text = 'Page ' + str(curr_position + 1) + '/' + str(len(pages))
+        embed.set_footer(text=footer_text)
+        embed.add_field(name='Item price', value=pages[curr_position][3], inline=True)
+        embed.add_field(name='Predicted price(1yr)', value=pages[curr_position][4], inline=True)
+        return embed
 
 
 @client.event
@@ -1242,7 +1292,11 @@ async def on_message(message):
                 # These two variables will be used to calculate the minimum sulfur for the current building item
                 min_sulfur = 999999
                 lowest_explosive = ''
-                embed = discord.Embed()
+                # Check if the server has the cambot sulfur emote. If not, display the string 'sulfur' instead of an
+                # emote
+                sulfur_emote = check_emoji(message.channel.guild.emojis, 'sulfur')
+                if sulfur_emote is None:
+                    sulfur_emote = 'sulfur'
                 # Iterate through the list of all explosives and only get the data of the ones we are looking for
                 for explosive_row in all_explosives:
                     flag = True
@@ -1251,16 +1305,24 @@ async def on_message(message):
                         if explosive_row["data-group2"] == 'soft':
                             flag = False
                     if flag:
-                        # If the current row we are looking at is one of the items we are looking for, add its data to our
-                        # output string
+                        # If the current row we are looking at is one of the items we are looking for,
+                        # add its data to our output string
                         explosive_name = explosive_row.find('a').text
                         explosive = explosive_row.find_all('td')
                         if explosive_name == 'Timed Explosive Charge' or explosive_name == 'Rocket' or \
                                 explosive_name == 'Satchel Charge' or explosive_name == 'Explosive 5.56 Rifle Ammo':
                             curr_sulfur = (num_building * int(''.join(filter(str.isdigit, explosive[5].text))))
-                            # Get the item name, quantity, and sulfur cost and append them to explosive_cost
-                            curr_cost = '\n\t• ' + str(num_building * int(explosive[2].text)) + ' ' + explosive_name \
-                                        + '(**' + str(curr_sulfur) + ' sulfur**)'
+                            # Get the item name, quantity, and sulfur cost. Check for the emoji corresponding to the
+                            # current explosive
+                            explosive_emoji = check_emoji(message.channel.guild.emojis,
+                                                          ''.join(explosive_name.split('.')))
+                            # If the emoji isn't in the server then just use the string name
+                            if explosive_emoji is None:
+                                explosive_emoji = explosive_name
+                            curr_cost = '\n\t' + str(explosive_emoji) + '\tx' + \
+                                        str(num_building * int(explosive[2].text)) + ' (' + str(curr_sulfur) + \
+                                        str(sulfur_emote) + ')'
+
                             explosive_cost += curr_cost
                             if curr_sulfur < min_sulfur:
                                 min_sulfur = curr_sulfur
@@ -1276,8 +1338,8 @@ async def on_message(message):
                     # Add minimum sulfur cost to the total minimum
                     total_min_sulfur += min_sulfur
                     min_sulfur_string += lowest_explosive
-            await message.channel.send(explosive_cost + '\n\nThe cheapest path would cost **' + str(total_min_sulfur) +
-                                       ' sulfur** by using:' + min_sulfur_string)
+            await message.channel.send(explosive_cost + '\n\nThe cheapest path would cost ' + str(total_min_sulfur) +
+                                       str(sulfur_emote) + ' by using:' + min_sulfur_string)
 
 
     elif message.content.lower().startswith('!skinlist'):
@@ -1303,36 +1365,77 @@ async def on_message(message):
                 await message.channel.send('Displaying the 10 cheapest skins on the market:')
                 desc = ''
                 # Get the link for each item and output it in an embed
+                i = 0
                 for s in sorted_by_price:
                     sql = "SELECT link FROM skin WHERE skin_name = %s"
                     val = (s,)
                     cursor.execute(sql, val)
                     link = cursor.fetchone()[0]
-                    if len(desc) + len('[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(link).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = '$' + str(sorted_by_price[s])
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s,
+                                              url=link)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Price', value=price, inline=True)
+                        msg = await message.channel.send('Displaying the 10 cheapest skins:', embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s, price, link, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
+
             else:
                 # Get a list of objects containing all items of search_type
                 skin_list, best_skin = cross_reference_skins(search_type)
                 # Once we have a list of sorted objects, diplay the first 10. These will be the 10 cheapest skins for
                 # skin_type in this case
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.cp))[:10]
-                await message.channel.send('Displaying the 10 cheapest skins for **' + best_skin + '**:')
+                msg_text = 'Displaying the 10 cheapest skins for ' + best_skin + ':'
                 desc = ''
+                i = 0
                 for s in sorted_by_price:
-                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(s.l).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = '$' + str(s.cp)
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s.n,
+                                              url=s.l)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Price', value=price, inline=True)
+                        msg = await message.channel.send(msg_text, embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
         elif args[1] == '-e':
             search_type = ' '.join(args[2:])
             # If there are no arguments after -e, then display the cheapest skins of all categories
@@ -1342,38 +1445,78 @@ async def on_message(message):
                 # Sort the list by price and take the 10 highest values
                 sorted_by_price = {k: v for k, v in sorted(skin_price_list.items(), key=lambda ite: float(ite[1]),
                                                            reverse=True)[:10]}
-                await message.channel.send('Displaying the 10 most expensive skins on the market:')
                 desc = ''
+                i = 0
                 # Once we have the most expensive items, get their store URLs and display them in an embed
                 for s in sorted_by_price:
                     sql = "SELECT link FROM skin WHERE skin_name = %s"
                     val = (s,)
                     cursor.execute(sql, val)
                     link = cursor.fetchone()[0]
-                    if len(desc) + len('[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s + '](' + link + ')\t' + str('$' + sorted_by_price[s]) + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(link).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = '$' + str(sorted_by_price[s])
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s,
+                                              url=link)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Price', value=price, inline=True)
+                        msg = await message.channel.send('Displaying the 10 most expensive skins on the market:',
+                                                         embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s, price, link, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
             else:
                 skin_list, best_skin = cross_reference_skins(search_type)
                 # Once we have a list of sorted objects, diplay the first 10. These will be the 10 most expensive skins for
                 # skin_type in this case. This is pretty much the same as -c, except we reverse the sorting
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.cp), reverse=True)[:10]
-                await message.channel.send('Displaying the 10 most expensive skins for **' + best_skin + '**:')
+                msg_text = 'Displaying the 10 most expensive skins for ' + best_skin + ':'
                 desc = ''
+                i = 0
                 for s in sorted_by_price:
-                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s.n + '](' + s.l + ')\t' + str('$' + s.cp) + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(s.l).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = '$' + str(s.cp)
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s.n,
+                                              url=s.l)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Price', value=price, inline=True)
+                        msg = await message.channel.send(msg_text, embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
         elif args[1] == '-lp':
             search_type = ' '.join(args[2:])
             # If there are no arguments after -lp, then display the least profitable of all categories
@@ -1384,34 +1527,74 @@ async def on_message(message):
                 skin_list = cross_reference_skins()
                 # Once we have the skins, sort them by percent profit and take the 10 lowest values
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc))[:10]
-                await message.channel.send('Displaying the 10 skins with lowest returns on the market:')
                 desc = ''
                 # Display the results in an embed
+                i = 0
                 for s in sorted_by_price:
-                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(s.l).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = str(s.pc) + '%'
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s.n,
+                                              url=s.l)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Percent change', value=price, inline=True)
+                        msg = await message.channel.send('Displaying the 10 skins with lowest returns on the market:',
+                                                         embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
             else:
                 skin_list, best_skin = cross_reference_skins(search_type)
                 # Once we have a list of sorted objects, diplay the first 10. These will be the 10 cheapest skins for
                 # skin_type in this case
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc))[:10]
-                await message.channel.send('Displaying the 10 skins with lowest returns for **' + best_skin + '**:')
+                msg_text = 'Displaying the 10 skins with lowest returns for ' + best_skin + ':'
                 desc = ''
+                i = 0
                 for s in sorted_by_price:
-                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(s.l).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = str(s.pc) + '%'
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s.n,
+                                              url=s.l)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Percent change', value=price, inline=True)
+                        msg = await message.channel.send(msg_text, embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
         elif args[1] == '-mp':
             search_type = ' '.join(args[2:])
             # If there are no arguments after -lp, then display the least profitable of all categories
@@ -1422,34 +1605,74 @@ async def on_message(message):
                 skin_list = cross_reference_skins()
                 # Once we have the list of skins, sort them by %profit and take the 10 highest values
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc), reverse=True)[:10]
-                await message.channel.send('Displaying the 10 skins with highest returns on the market:')
                 desc = ''
+                i = 0
                 # Display results in an embed
                 for s in sorted_by_price:
-                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(s.l).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = str(s.pc) + '%'
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s.n,
+                                              url=s.l)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Percent change', value=price, inline=True)
+                        msg = await message.channel.send('Displaying the 10 skins with lowest returns on the market:',
+                                                         embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
             else:
                 skin_list, best_skin = cross_reference_skins(' '.join(args[2:]))
                 # Once we have a list of sorted objects, diplay the first 10. These will be the 10 cheapest skins for
                 # skin_type in this case
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc), reverse=True)[:10]
-                await message.channel.send('Displaying the 10 skins with highest returns for **' + best_skin + '**:')
+                msg_text = 'Displaying the 10 skins with highest returns for ' + best_skin + ':'
                 desc = ''
+                i = 0
                 for s in sorted_by_price:
-                    if len(desc) + len('[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n') >= 2000:
-                        embed = discord.Embed(description=desc)
-                        await message.channel.send(embed=embed)
-                        desc = ""
-                    else:
-                        desc += '[' + s.n + '](' + s.l + ')\t' + str(s.pc + '%') + '\n'
-                embed = discord.Embed(description=desc)
-                await message.channel.send(embed=embed)
+                    thumbnail = get_html(s.l).find('div', {"class": "market_listing_largeimage"}).find('img')['src']
+                    price = str(s.pc) + '%'
+                    if i == 0:
+                        # Display the first item we get in an embed. This is done using a counter because we need
+                        # The link for the item which is generated in this loop but only the first item needs
+                        # to be displayed and we would lose the item link upon looping. I could query for the first
+                        # item with the channel and message ids but I think this is faster
+                        embed = discord.Embed(title=s.n,
+                                              url=s.l)
+                        embed.set_thumbnail(url=thumbnail)
+                        footer_text = 'Page 1/' + str(len(sorted_by_price))
+                        embed.set_footer(text=footer_text)
+                        embed.add_field(name='Percent change', value=price, inline=True)
+                        msg = await message.channel.send(msg_text, embed=embed)
+                        # React to the message to set up navigation
+                        await msg.add_reaction('◀')
+                        await msg.add_reaction('▶')
+                    # Insert all other items into the SQL database with corresponding message and channel ids
+                    try:
+                        sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
+                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                        val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
+                        cursor.execute(sql, val)
+                        connection.commit()
+                    except Exception as e:
+                        pass
+                    i += 1
         else:
             skin_type = ' '.join(args[1:])
             data, best_skin = get_skins_of_type(skin_type)
@@ -1563,13 +1786,14 @@ async def on_message(message):
                 else:
                     # If the user entered a valid amount, call recycle with the amount
                     recycle_num = args[-1]
-                    await message.channel.send(recycle(' '.join(recycle_name), recycle_num))
+                    await message.channel.send(embed=recycle(' '.join(recycle_name), recycle_num,
+                                                             message.channel.guild.emojis))
             # If the user didn't enter an amount, add the last word to the item name and call recycle with 1 as
             # the amount
             except Exception as e:
                 if not recycle_name:
                     recycle_name.append(i)
-                await message.channel.send(recycle(' '.join(recycle_name), 1))
+                await message.channel.send(embed=recycle(' '.join(recycle_name), 1, message.channel.guild.emojis))
 
     # Checks pop of frequented servers if no server argument, and searches for a specific server if specified
     elif message.content.lower().startswith('!serverpop'):
@@ -1775,15 +1999,15 @@ async def on_message(message):
             embed.add_field(name="Release date", value=skin_initial_date, inline=True)
             embed.add_field(name="Initial price", value='$' + str(skin_initial_price), inline=True)
             embed.add_field(name="Current price", value='$' + str(current_price), inline=True)
-            embed.add_field(name="Price difference", value='$' + str(current_price - skin_initial_price), inline=True)
+            embed.add_field(name="Price difference", value='$' + '{0:.2f}'.format(current_price - skin_initial_price)
+                            , inline=True)
             embed.add_field(name="Percent change", value=str(percent_change) + '%', inline=True)
             embed.add_field(name='Skin for:', value=skin_type, inline=True)
             await message.channel.send(embed=embed)
 
 
-
     # Print out the latest news regarding Rust's future update
-    # This will be used to return news whenever the website updates
+    # This is used to return news whenever the website updates
     elif message.content.lower().startswith('!rustnews'):
         # Navigate to Rustafied.com and get the title and description of the new article
         title, desc = get_news('https://rustafied.com')
@@ -2092,7 +2316,10 @@ async def on_message(message):
                 # the item
                 row = repair_table_body.find('tr')
                 cols = row.find_all('td')
-                embed = discord.Embed()
+                embed_title = 'Displaying repair cost for ' + best_item.text
+                embed = discord.Embed(title=embed_title)
+                item_img = "https://www." + repair_html.find('img', {"class": "main-icon"})['src'][2:]
+                embed.set_thumbnail(url=item_img)
                 materials = cols[2].find_all('img')
                 for material in materials:
                     material_name = material['alt']
@@ -2100,14 +2327,19 @@ async def on_message(message):
                     # If the quantity is empty, then there is only 1 of that material required
                     if quantity == '':
                         quantity = 1
-                    embed.add_field(name=material_name, value=quantity, inline=False)
+                    emoji = check_emoji(message.channel.guild.emojis, material_name)
+                    if emoji:
+                        embed_text = str(emoji) + ' x' + str(quantity)
+                    else:
+                        embed_text = material_name + ' x' + str(quantity)
+                    embed.add_field(name=embed_text, value="\n\u200b", inline=True)
                 embed.add_field(name="Condition Loss", value=cols[3].text, inline=False)
                 embed.add_field(name="Blueprint required?", value=cols[4].text, inline=False)
             except Exception as e:
                 await message.channel.send(best_item.text + ' has no repair data. Use **!repair [itemName]**')
                 return
             # Output the item's repair data as an embed
-            await message.channel.send('Displaying repair cost for **' + best_item.text + '**:', embed=embed)
+            await message.channel.send(embed=embed)
 
     # Outputs the most efficient furnace ratios for a specific furnace and ore type
     elif message.content.lower().startswith('!furnaceratios'):
@@ -2246,13 +2478,14 @@ async def on_message(message):
                 else:
                     # If the user entered a valid amount, call craft_calc with the amount
                     craftnum = args[-1]
-                    await message.channel.send(craft_calc(' '.join(craft_name), craftnum))
+                    await message.channel.send(embed=craft_calc(' '.join(craft_name), craftnum,
+                                                                message.channel.guild.emojis))
             # If the user didn't enter an amount, add the last word to the item name and call craft_calc with 1 as
             # the amount
             except Exception as e:
                 if not craft_name:
                     craft_name.append(i)
-                await message.channel.send(craft_calc(' '.join(craft_name), 1))
+                await message.channel.send(embed=craft_calc(' '.join(craft_name), 1, message.channel.guild.emojis))
 
     # Tweet a message using tweepy
     elif message.content.lower().startswith('!tweet'):
@@ -2271,18 +2504,14 @@ async def on_message(message):
 
         await message.channel.send(embed=embed)
 
-    elif message.content.lower().startswith('!test'):
-        em = discord.Embed()
-        em.set_image(url='https://cdn.discordapp.com/attachments/684062237882580994/726053057506312263/test.png')
-        await message.channel.send('Test', embed=em)
-
-    if message.content.lower().startswith('!addemojis'):
+    elif message.content.lower().startswith('!addemojis'):
         result = await add_emojis(message.channel.guild)
         await message.channel.send(result)
 
     elif message.content.lower().startswith('!removeemojis'):
         result = await remove_emojis(message.channel.guild)
         await message.channel.send(result)
+
 
 client.loop.create_task(check())
 client.run(keys[0])
