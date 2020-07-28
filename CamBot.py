@@ -391,11 +391,11 @@ def craft_calc(search_term, num_crafts, guild_emojis):
         try:
             recipe = craft_html.find('td', {"class": "item-cell"}).parent
         except Exception as e:
-            return 'This item has no recipe'
+            return item.text + ' has no crafting recipe'
         # Get the first td in the tr with a class title 'no-padding'
         ingredient_td = recipe.find('td', {"class": "no-padding"})
         if ingredient_td is None:
-            return 'This item has no recipe'
+            return item.text + ' has no crafting recipe'
         else:
             # Find all ingredients in the first row we found
             ingredients = ingredient_td.find_all('a', {"class": "item-box"})
@@ -403,7 +403,10 @@ def craft_calc(search_term, num_crafts, guild_emojis):
             # we have to get the output of the recipe(ex: 1 gunpowder craft gives you 10 gunpowder) in order to
             # make the numbers correct
             output_img = craft_html.find('img', {"class": "blueprint40"})
-            output_number = output_img.find_next_sibling()
+            try:
+                output_number = output_img.find_next_sibling()
+            except AttributeError as e:
+                return item.text + ' has no crafting recipe'
             if output_number.text == '':
                 output_number = 1
             else:
@@ -414,6 +417,10 @@ def craft_calc(search_term, num_crafts, guild_emojis):
             item_img = "https://www." + craft_html.find('img', {"class": "main-icon"})['src'][2:]
             embed.set_thumbnail(url=item_img)
             for ingredient in ingredients:
+                # Pad the embed every 2nd column to get 2-column output as long as the number of columns isn't a multiple
+                # of 3
+                if (not (len(ingredients) % 3) == 0) and (len(embed.fields) % 3) == 1:
+                    embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
                 # Get quantity of materials, default to 1(if no text), if there is text strip the 'x' or 'ft' from the
                 # text and convert it to an int so we can multiply by num_crafts
                 quantity = 1
@@ -429,7 +436,7 @@ def craft_calc(search_term, num_crafts, guild_emojis):
                 else:
                     embed_text = item_name + ' x' + str(total)
 
-                embed.add_field(name=embed_text, value="\n\u200b", inline=False)
+                embed.add_field(name=embed_text, value="\n\u200b", inline=True)
 
             # Check if there is a sulfur amount in the craft footer. If so, get the total sulfur amount and
             # output it. If we encounter an error, don't return any sulfur values
@@ -466,8 +473,6 @@ def get_best_match(i_list, term):
         if temp_ratio > best_item_match_num:
             best_item_match = i
             best_item_match_num = temp_ratio
-        else:
-            pass
     return best_item_match
 
 
@@ -696,19 +701,31 @@ def get_skins_of_type(type):
 
 # For an input amount of sulfur, display how many rockets, c4, etc you can craft
 # @Param sulfur: How much sulfur the user has
+# @Param guild: Guild the message was sent in to check for emotes
 # @Return: A string containing how many of each explosive they can craft
-def sulf_calc(sulfur):
-    rocket_sulf = 1400
-    explo_sulf = 25
-    satchel_sulf = 480
-    c4_sulf = 2200
-    sulf_string = 'With **' + str(sulfur) + '** sulfur, you can craft:\n' + '\t**' + str(sulfur // rocket_sulf) + \
-                  '** Rockets with **' + str(sulfur % rocket_sulf) + '** sulfur left over\n' + '\t**' + \
-                  str(sulfur // explo_sulf) + '** Explosive 5.56 with **' + str(sulfur % explo_sulf) + \
-                  '** sulfur left over\n' + '\t**' + str(sulfur // satchel_sulf) + '** Satchel Charges with **' \
-                  + str(sulfur % satchel_sulf) + '** sulfur left over\n' + '\t**' + str(sulfur // c4_sulf) + \
-                  '** C4 with **' + str(sulfur % c4_sulf) + '** sulfur left over'
-    return sulf_string
+def sulf_calc(sulfur, guild):
+    # Check if the sulfur emote is in the server
+    sulfur_emoji = check_emoji(guild.emojis, 'sulfur')
+    # If the emoji isn't in the server then just use the string name
+    if sulfur_emoji is None:
+        sulfur_emoji = 'sulfur'
+    # Initialize the embed with a title using the sulfur emote
+    embed_title = 'With ' + str(sulfur) + str(sulfur_emoji) + ' you can craft:'
+    embed = discord.Embed(title=embed_title)
+    # Create a dict of all other explosives with their sulfur values
+    explosive_dict = {'rocket': 1400, 'explosive 5.56 rifle ammo': 25, 'satchel charge': 480,
+                      'timed explosive charge': 2200}
+    for explosive in explosive_dict.keys():
+        # Pad each embed 'row' with an empty field to get a 2-column output
+        if (len(embed.fields) % 3) == 1:
+            embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+        explosive_emoji = check_emoji(guild.emojis, ''.join(explosive.split('.')))
+        if explosive_emoji is None:
+            explosive_emoji = explosive
+        embed_name = str(explosive_emoji) + ' x' + str(sulfur // explosive_dict[explosive])
+        embed_value = str(sulfur % explosive_dict[explosive]) + str(sulfur_emoji) + ' left over'
+        embed.add_field(name=embed_name, value=embed_value, inline=True)
+    return embed
 
 
 # Cross references skins of a certain type with a master list of skins and their current prices retrieved from
@@ -784,6 +801,10 @@ def recycle(search_term, num_items, guild_emojis):
         item_img = "https://www." + recycle_html.find('img', {"class": "main-icon"})['src'][2:]
         embed.set_thumbnail(url=item_img)
         for output in recycle_output:
+            # Pad the embed every 2nd column to get 2-column output as long as the number of columns isn't a multiple
+            # of 3
+            if (not (len(recycle_output) % 3) == 0) and (len(embed.fields) % 3) == 1:
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
             recycle_name = output.find('img')['alt']
             emoji = check_emoji(guild_emojis, recycle_name)
             # If we find an emoji, display that instead of recycle_name
@@ -799,7 +820,7 @@ def recycle(search_term, num_items, guild_emojis):
             else:
                 recycle_quantity = int(''.join(filter(str.isdigit, recycle_quantity))) * num_items
                 recycle_text = str(recycle_name) + ' x' + str(recycle_quantity)
-            embed.add_field(name=recycle_text, value="\n\u200b", inline=False)
+            embed.add_field(name=recycle_text, value="\n\u200b", inline=True)
         return embed
 
 
@@ -884,6 +905,7 @@ def gen_emojis():
 # @Return emoji: Corresponding emoji if found, None if not
 def check_emoji(guild_emojis, item_str):
     for emoji in guild_emojis:
+        # Strip all _ characters and remove the cambot prefix from all emotes in the server
         emoji_name = emoji.name.split('_')[1:]
         emoji_name = ' '.join(emoji_name)
         if emoji_name == item_str.lower():
@@ -1362,7 +1384,6 @@ async def on_message(message):
                 skin_price_list = get_skin_prices()
                 # Sort the returned dictionary by price and take the 10 lowest values
                 sorted_by_price = {k: v for k, v in sorted(skin_price_list.items(), key=lambda ite: float(ite[1]))[:10]}
-                await message.channel.send('Displaying the 10 cheapest skins on the market:')
                 desc = ''
                 # Get the link for each item and output it in an embed
                 i = 0
@@ -1384,7 +1405,7 @@ async def on_message(message):
                         footer_text = 'Page 1/' + str(len(sorted_by_price))
                         embed.set_footer(text=footer_text)
                         embed.add_field(name='Price', value=price, inline=True)
-                        msg = await message.channel.send('Displaying the 10 cheapest skins:', embed=embed)
+                        msg = await message.channel.send('Displaying the 10 cheapest skins on the market:', embed=embed)
                         # React to the message to set up navigation
                         await msg.add_reaction('◀')
                         await msg.add_reaction('▶')
@@ -1622,8 +1643,8 @@ async def on_message(message):
                         footer_text = 'Page 1/' + str(len(sorted_by_price))
                         embed.set_footer(text=footer_text)
                         embed.add_field(name='Percent change', value=price, inline=True)
-                        msg = await message.channel.send('Displaying the 10 skins with lowest returns on the market:',
-                                                         embed=embed)
+                        msg = await message.channel.send('Displaying the 10 skins with the highest '
+                                                         'returns on the market:', embed=embed)
                         # React to the message to set up navigation
                         await msg.add_reaction('◀')
                         await msg.add_reaction('▶')
@@ -1769,14 +1790,6 @@ async def on_message(message):
             await message.channel.send('This command will display the recycle output for a given item. Use '
                                        '**!recycle [itemname] [itemquantity]**')
         else:
-            # Get the item name and quantity from the user input
-            recycle_name = []
-            for i in args:
-                # Omit the !recycle command and the item number from the item name
-                if i == args[0] or i == args[-1]:
-                    pass
-                else:
-                    recycle_name.append(i)
             # Try to convert the last word in the command to an int to test if the user entered an amount
             try:
                 # If the user entered an amount, check if it is a valid amount
@@ -1784,16 +1797,39 @@ async def on_message(message):
                 if args[-1] <= 0:
                     await message.channel.send('Please enter a valid number')
                 else:
+                    # Get the item name and quantity from the user input
+                    recycle_name = []
+                    for i in args:
+                        # Omit the !recycle command and the item number from the item name
+                        if i == args[0] or i == args[-1]:
+                            pass
+                        else:
+                            recycle_name.append(i)
                     # If the user entered a valid amount, call recycle with the amount
                     recycle_num = args[-1]
-                    await message.channel.send(embed=recycle(' '.join(recycle_name), recycle_num,
-                                                             message.channel.guild.emojis))
+                    embed = recycle(' '.join(recycle_name), recycle_num, message.channel.guild.emojis)
+                    if type(embed) is str:
+                        await message.channel.send(embed)
+                    else:
+                        await message.channel.send(embed=embed)
             # If the user didn't enter an amount, add the last word to the item name and call recycle with 1 as
             # the amount
             except Exception as e:
+                # Get the item name and quantity from the user input
+                recycle_name = []
+                for i in args:
+                    # Omit the !recycle command and the item number from the item name
+                    if i == args[0]:
+                        pass
+                    else:
+                        recycle_name.append(i)
                 if not recycle_name:
                     recycle_name.append(i)
-                await message.channel.send(embed=recycle(' '.join(recycle_name), 1, message.channel.guild.emojis))
+                embed=recycle(' '.join(recycle_name), 1, message.channel.guild.emojis)
+                if type(embed) is str:
+                    await message.channel.send(embed)
+                else:
+                    await message.channel.send(embed=embed)
 
     # Checks pop of frequented servers if no server argument, and searches for a specific server if specified
     elif message.content.lower().startswith('!serverpop'):
@@ -2404,7 +2440,7 @@ async def on_message(message):
                                        'sulfur amount. Use **!sulfur [sulfuramount]**')
         elif len(args) > 2:
             await message.channel.send('Too many arguments, please enter **!suflur [sulfuramount]**.'
-                                       ' If you have gunpower, simply multiply it by 2 to get the amount of sulfur')
+                                       ' If you have gunpower, multiply the amount by 2 to get the amount of sulfur')
         else:
             num_sulf = -1
             try:
@@ -2416,7 +2452,7 @@ async def on_message(message):
                 await message.channel.send('Please enter a valid number')
             else:
                 # If the user entered a valid amount, call craft_calc with the amount
-                await message.channel.send(sulf_calc(num_sulf))
+                await message.channel.send('', embed=sulf_calc(num_sulf, message.channel.guild))
 
     # Displays the current list of rust items for sale, along with their prices
     elif message.content.lower().startswith('!rustitems'):
@@ -2463,12 +2499,6 @@ async def on_message(message):
             await message.channel.send('This command will output the recipe of any item in rust that has a recipe.\n'
                                        'Use **!craftcalc [itemname] [quantity]**')
         else:
-            for i in args:
-                # Omit the !craftcalc command and the item number from the item name
-                if i == args[0] or i == args[-1]:
-                    pass
-                else:
-                    craft_name.append(i)
             # Try to convert the last word in the command to an int to test if the user entered an amount
             try:
                 # If the user entered an amount, check if it is a valid amount
@@ -2476,16 +2506,35 @@ async def on_message(message):
                 if args[-1] <= 0:
                     await message.channel.send('Please enter a valid number')
                 else:
+                    for i in args:
+                        # Omit the !craftcalc command and the item number from the item name
+                        if i == args[0] or i == args[-1]:
+                            pass
+                        else:
+                            craft_name.append(i)
                     # If the user entered a valid amount, call craft_calc with the amount
                     craftnum = args[-1]
-                    await message.channel.send(embed=craft_calc(' '.join(craft_name), craftnum,
-                                                                message.channel.guild.emojis))
+                    embed = craft_calc(' '.join(craft_name), craftnum, message.channel.guild.emojis)
+                    if type(embed) is str:
+                        await message.channel.send(embed)
+                    else:
+                        await message.channel.send(embed=embed)
             # If the user didn't enter an amount, add the last word to the item name and call craft_calc with 1 as
             # the amount
             except Exception as e:
+                for i in args:
+                    # Omit the !craftcalc command and the item number from the item name
+                    if i == args[0]:
+                        pass
+                    else:
+                        craft_name.append(i)
                 if not craft_name:
                     craft_name.append(i)
-                await message.channel.send(embed=craft_calc(' '.join(craft_name), 1, message.channel.guild.emojis))
+                embed = craft_calc(' '.join(craft_name), 1, message.channel.guild.emojis)
+                if type(embed) is str:
+                    await message.channel.send(embed)
+                else:
+                    await message.channel.send(embed=embed)
 
     # Tweet a message using tweepy
     elif message.content.lower().startswith('!tweet'):
