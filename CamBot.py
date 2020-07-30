@@ -361,9 +361,9 @@ def get_status():
     for server in server_names:
         connection_status = requests.head(server)
         if connection_status.status_code == 200 or 301:
-            server_dict[server] = '🟢'
+            server_dict[server] = '🟢 Online'
         else:
-            server_dict[server] = '🔴'
+            server_dict[server] = '🔴 Offline'
     return server_dict
 
 
@@ -877,7 +877,7 @@ def format_text(str_list, cols):
     # Pad the columns to equal widths
     lines = (' '.join(justify_list[i:i + cols]) for i in range(0, len(justify_list), cols))
     # Join all lines and return the resulting string
-    return '\n'.join(lines)
+    return lines
 
 
 # Generates all emojis needed for cambot
@@ -937,6 +937,20 @@ def check_guild_emojis(guild_emojis):
                 missing_emojis.remove(cam_emoji_name)
 
     return missing_emojis
+
+
+def get_uptime(start_time):
+    curr_time = datetime.now()
+    elapsed_time = curr_time - start_time
+    seconds = elapsed_time.seconds
+    hours = seconds // 3600
+    if hours > 1:
+        seconds -= hours * 3600
+    minutes = seconds // 60
+    if minutes > 1:
+        seconds -= minutes * 60
+    output = str(elapsed_time.days) + 'd, ' + str(hours) + 'h, ' + str(minutes) + 'm, ' + str(seconds) + 's'
+    return output
 
 
 # Adds all missing emojis to the corresponding guild
@@ -1037,6 +1051,8 @@ def gen_embed(curr_position, pages):
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
+    global CAMBOT_START_TIME
+    CAMBOT_START_TIME = datetime.now()
 
 
 @client.event
@@ -1151,51 +1167,182 @@ async def on_guild_join(guild):
 
 @client.event
 async def on_message(message):
-    # Ignore messages from the bot to avoid infinite looping
-    if message.author == client.user:
+    # Ignore messages from the bot to avoid infinite looping and ignore messages that aren't commands
+    if message.author == client.user or not message.content.lower().startswith('!'):
         return
-    # Dont bother processing a message if it isn't a command
-    if not message.content.lower().startswith('!'):
-        return
-
-    # Display all commands. This was originally a function call but I didn't really see the point if using embeds
+    # Display all commands / get cambot's uptime and server stats
     if message.content.lower().startswith('!cambot'):
-        embed = discord.Embed()
-        embed.add_field(name="**!craftcalc**", value="Outputs the recipe of an item", inline=True)
-        embed.add_field(name="**!status**", value="Outputs the current status of CamBot's dependent servers",
-                        inline=True)
-        embed.add_field(name="**!serverpop**", value="Outputs the current pop of any server", inline=True)
-        embed.add_field(name="**!devblog**", value="Posts a link to the newest devblog with a short summary",
-                        inline=True)
-        embed.add_field(name="**!rustnews**", value="Posts a link to the latest news on Rust's development info",
-                        inline=True)
-        embed.add_field(name="**!rustitems**", value="Displays all items on the Rust store along with prices",
-                        inline=True)
-        embed.add_field(name="**!droptable**", value="Outputs the drop table for a crate/NPC", inline=True)
-        embed.add_field(name="**!lootfrom**", value="Outputs drop rates for a specific item", inline=True)
-        embed.add_field(name="**!sulfur**", value="Outputs how many explosives you can craft with a specific sulfur "
-                                                  "amount", inline=True)
-        embed.add_field(name="**!furnaceratios**", value="Shows the most efficient furnace ratios for a given furnace "
-                                                         "and ore type", inline=True)
-        embed.add_field(name="**!smelting**", value="Shows smelting data for a given item", inline=True)
-        embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=True),
-        embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=True),
-        embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=True)
-        embed.add_field(name="**!stats**", value="Outputs the stats of a given item(weapon, armor, etc)", inline=True)
-        embed.add_field(name="**!repair**", value="Outputs the cost to repair an item", inline=True)
-        embed.add_field(name="**!binds**", value="Displays all supported commands to bind", inline=True)
-        embed.add_field(name="**!gamble**", value="Displays bandit camp wheel percentages and calculates the "
-                                                  "chance of a certain outcome occuring", inline=True)
-        embed.add_field(name="**!skinlist**", value="Displays a list of skins for a certain item"
-                                                    " for a certain item", inline=True)
-        embed.add_field(name="**!raidcalc**", value="Calculates how many rockets/c4/etc to get through a certain"
-                                                    " amount of walls/doors", inline=True)
-        embed.add_field(name="**!durability**", value="Displays how much of various tools/explosives it takes"
-                                                      " to get through a certain building item", inline=True)
-        embed.add_field(name="**!experiment**", value="Displays experiment tables of the tier 1, 2, and 3 workbenches",
-                        inline=True)
-        await message.channel.send('Here is a list of commands. For more info on a specific command, use '
-                                   '**![commandName]**\n', embed=embed)
+        args = message.content.lower().split()
+        if len(args) > 1 and args[1] == 'info':
+            uptime = get_uptime(CAMBOT_START_TIME)
+            num_servers = len(client.guilds)
+            embed = discord.Embed(title="Cambot provides useful data for skins/items in Rust",
+                                  description="[Add Cambot to your server](https://discord.com/oauth2/authorize?c"
+                                              "lient_id=684058359686889483&permissions=8&scope=bot)")
+
+            embed.add_field(name="Uptime", value=uptime, inline=True)
+            embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+            embed.add_field(name="Connected servers", value=num_servers, inline=True)
+            avatar = client.user.avatar_url
+            embed.set_thumbnail(url=avatar)
+            await message.channel.send(embed=embed)
+
+        else:
+            embed = discord.Embed()
+            embed.add_field(name="**!craftcalc**", value="Outputs the recipe of an item", inline=True)
+            embed.add_field(name="**!status**", value="Outputs the current status of CamBot's dependent servers",
+                            inline=True)
+            embed.add_field(name="**!serverpop**", value="Outputs the current pop of any server", inline=True)
+            embed.add_field(name="**!devblog**", value="Posts a link to the newest devblog with a short summary",
+                            inline=True)
+            embed.add_field(name="**!rustnews**", value="Posts a link to the latest news on Rust's development info",
+                            inline=True)
+            embed.add_field(name="**!rustitems**", value="Displays all items on the Rust store along with prices",
+                            inline=True)
+            embed.add_field(name="**!droptable**", value="Outputs the drop table for a crate/NPC", inline=True)
+            embed.add_field(name="**!lootfrom**", value="Outputs drop rates for a specific item", inline=True)
+            embed.add_field(name="**!sulfur**",
+                            value="Outputs how many explosives you can craft with a specific sulfur "
+                                  "amount", inline=True)
+            embed.add_field(name="**!furnaceratios**",
+                            value="Shows the most efficient furnace ratios for a given furnace "
+                                  "and ore type", inline=True)
+            embed.add_field(name="**!smelting**", value="Shows smelting data for a given item", inline=True)
+            embed.add_field(name="**!campic**", value="Posts a HOT pic of Cammy", inline=True),
+            embed.add_field(name="**!recycle**", value="Displays the output of recycling an item", inline=True),
+            embed.add_field(name="**!skindata**", value="Displays skin price data for an item", inline=True)
+            embed.add_field(name="**!stats**", value="Outputs the stats of a given item(weapon, armor, etc)",
+                            inline=True)
+            embed.add_field(name="**!repair**", value="Outputs the cost to repair an item", inline=True)
+            embed.add_field(name="**!binds**", value="Displays all supported commands to bind", inline=True)
+            embed.add_field(name="**!gamble**", value="Displays bandit camp wheel percentages and calculates the "
+                                                      "chance of a certain outcome occuring", inline=True)
+            embed.add_field(name="**!skinlist**", value="Displays a list of skins for a certain item"
+                                                        " for a certain item", inline=True)
+            embed.add_field(name="**!raidcalc**", value="Calculates how many rockets/c4/etc to get through a certain"
+                                                        " amount of walls/doors", inline=True)
+            embed.add_field(name="**!durability**", value="Displays how much of various tools/explosives it takes"
+                                                          " to get through a certain building item", inline=True)
+            embed.add_field(name="**!experiment**",
+                            value="Displays experiment tables of the tier 1, 2, and 3 workbenches",
+                            inline=True)
+            embed.add_field(name="**!cambot info**",
+                            value="Displays uptime, connected servers, and a join link for Cambot",
+                            inline=True)
+            embed.add_field(name="**!durability**",
+                            value="Displays durability of a certain item/building block",
+                            inline=True)
+            await message.channel.send('Here is a list of commands. For more info on a specific command, use '
+                                       '**![commandName]**\n', embed=embed)
+
+    elif message.content.lower().startswith('!durability'):
+        # Split the input command into a list
+        args = message.content.lower().split()
+        # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
+        if len(args) == 1:
+            await message.channel.send('This command displays the durability of a certain item. It will display the '
+                                       'number of various explosives/tools to break one. Use '
+                                       '**!durability [itemName] [-h or -s if there is a hard/soft side]**')
+        # If the user entered arguments, get the arguments to determine what to do
+        else:
+            soft_flag = False
+            # Check if there is a -h or -s flag at the end
+            if args[-1] == '-h':
+                # If there is a hard flag, set its variable to true and make the building name all args
+                # except first and last
+                building_name = ' '.join(args[1:-1])
+            elif args[-1] == '-s':
+                # If there is a soft flag, set its variable to true and make the building name all args
+                # except first and last
+                soft_flag = True
+                building_name = ' '.join(args[1:-1])
+            else:
+                # If there is no flag, make the building name all args except the first
+                building_name = ' '.join(args[1:])
+            # Get a master list of all building items from the 2 links below. This is done outside of the for loop
+            # to improve efficiency as getting this list has a lot of overhead.
+            building_block_html = get_html('https://rustlabs.com/group=building-blocks')
+            construction_html = get_html('https://rustlabs.com/group=build')
+            deployable_html = get_html('https://rustlabs.com/group=items')
+            all_links = []
+            # Get all links from the building blocks page and insert them into the list
+            building_block_tables = building_block_html.find_all('table', {"class": "table w100 olive"})
+            for table in building_block_tables:
+                rows = table.find_all('tr')
+                for row in rows:
+                    all_links.append(row.find('a'))
+            # Get all links from the construction page and insert them into the list. This cannot be done with a
+            # method as both pages are structured differently from each other
+            all_links.extend(construction_html.find('div', {"class": "info-block group"}).find_all('a'))
+            all_links.extend(deployable_html.find('div', {"class": "info-block group"}).find_all('a'))
+            # Once we have the building name, search for the best matching one based on the user's search term
+            best_building = get_best_match(all_links, building_name)
+            # Once we have the best matching link based on name, open the link to the durability tab
+            building_url = 'http://www.rustlabs.com' + best_building['href'] + '#tab=destroyed-by'
+            best_building_html = get_html(building_url)
+
+            # Get the image of the item we are looking up
+            try:
+                # There are 2 different identifiers for images. The newer one is called main-icon while there is an
+                # older one called screenshot. Try the newer one and if we get an error use the old one
+                item_img = 'https://www.' + best_building_html.find('img', {"class": "main-icon"})['src'][2:]
+            except TypeError as e:
+                item_img = 'https://www.' + best_building_html.find('img', {"id": "screenshot"})['src'][2:]
+            # Check if there is a hard/soft side toggle for the block we are checking
+            if best_building_html.find('ul', {"class": "tab-switcher filter"}):
+                # If there is a toggle, get all melee and explosive rows that are hard/soft side depending on the flag
+                if soft_flag:
+                    items = best_building_html.find_all('tr', attrs={"data-group": "explosive", "data-group2": "both"})
+                    items.extend(
+                        best_building_html.find_all('tr', attrs={"data-group": "explosive", "data-group2": "soft"}))
+                    items.extend(
+                        best_building_html.find_all('tr', attrs={"data-group": "melee", "data-group2": "soft"}))
+                else:
+                    items = best_building_html.find_all('tr', attrs={"data-group": "explosive", "data-group2": "both"})
+                    items.extend(
+                        best_building_html.find_all('tr', attrs={"data-group": "explosive", "data-group2": "hard"}))
+                    items.extend(
+                        best_building_html.find_all('tr', attrs={"data-group": "melee", "data-group2": "hard"}))
+            else:
+                # If there is no toggle, get all items for melee and explosives
+                items = best_building_html.find_all('tr', {"data-group": "explosive"})
+                items.extend(best_building_html.find_all('tr', {"data-group": "melee"}))
+            embed_title = 'Displaying the durability of ' + best_building.text
+            embed = discord.Embed(title=embed_title, url=building_url)
+            embed.set_thumbnail(url=item_img)
+            # For each row, format the strings and display the data in an embed field
+            for item in items:
+                item_str = item.text.strip().split('\n')
+                # There are certain items that simply aren't worth displaying data for and thus take up valuable
+                # embed fields. To fix this we simply blacklist some of the items so they are never displayed
+                bad_items = {'Jackhammer', 'Chainsaw', 'Salvaged Cleaver', 'Mace', 'Stone Hatchet',
+                             'Stone Pickaxe', 'Combat Knife', 'TorchLit', 'Torch', 'Salvaged Axe', 'Stone Spear'}
+                if item_str[0] in bad_items:
+                    pass
+                else:
+                    # Check if item_str[1] is null, if it is then the row is offset by 1. Don't ask why the site does this
+                    if item_str[1]:
+                        # Replace hour/min/sec with letters to shorten the field so the embed looks nicer
+                        item_str[2] = item_str[2].replace(' hours', 'h')
+                        item_str[2] = item_str[2].replace(' hour', 'h')
+                        item_str[2] = item_str[2].replace(' min', 'm')
+                        item_str[2] = item_str[2].replace(' sec', 's')
+                        embed_value = 'Quantity: ' + item_str[1] + '\n' + 'Time: ' + item_str[2] + '\n'
+                    else:
+                        item_str[3] = item_str[3].replace(' hours', 'h')
+                        item_str[3] = item_str[3].replace(' hour', 'h')
+                        item_str[3] = item_str[3].replace(' min', 'm')
+                        item_str[3] = item_str[3].replace(' sec', 's')
+                        embed_value = 'Quantity: ' + item_str[2] + '\n' + 'Time: ' + item_str[3] + '\n'
+                    # Check if there is a sulfur value to display
+                    if item_str[-1] != '-':
+                        embed_value += 'Sulfur cost: ' + item_str[-1][1:]
+                    # Format the item name to get rid of unnecessary text
+                    item_str[0] = item_str[0].replace('Stuck (right click)', '')
+                    item_str[0] = item_str[0].replace('Rifle AmmoSemi-Automatic Rifle', '')
+                    item_str[0] = item_str[0].replace('Workbench Refill', '')
+                    embed.add_field(name=item_str[0], value=embed_value, inline=True)
+        await message.channel.send(embed=embed)
 
     elif message.content.lower().startswith('!experiment'):
         # Split the input command into a list
@@ -1227,16 +1374,20 @@ async def on_message(message):
                     str_items.append(temp_str)
                     num_items += 1
 
-                table_string = format_text(str_items, 5)
+                # Format table items into 5 columns and return each line in a generator
+                table_lines = format_text(str_items, 5)
 
                 await message.channel.send('Displaying the experiment table for **workbench level ' + str(tier)
                                            + '**:\n')
-
-                # Split the message every 1900 character, preserving formatting in case the message is too long
-                messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
-                # Display all messages in the list 'messages'
-                for msg in messages:
-                    await message.channel.send('```' + msg + '```')
+                # For each line we are trying to output, check if adding it would put us close to the message length
+                # limit. If we are approaching it, post the current string and start a new one
+                output_msg = ''
+                for line in table_lines:
+                    if len(output_msg) + len(line) > 1900:
+                        await message.channel.send('```' + output_msg + '```')
+                        output_msg = ''
+                    output_msg += line + '\n'
+                await message.channel.send('```' + output_msg + '```')
                 await message.channel.send('The chance of getting one item is 1 in ' + str(num_items) + ' or '
                                            + '{0:.2f}'.format((1 / num_items) * 100) + '%')
             else:
@@ -1274,9 +1425,9 @@ async def on_message(message):
             construction_links = construction_html.find('div', {"class": "info-block group"}).find_all('a')
             for link in construction_links:
                 all_links.append(link)
-            explosive_cost = ''
             total_min_sulfur = 0
             min_sulfur_string = ''
+            embed = discord.Embed()
             # For each building block the user entered, get the sulfur cost of raiding it
             for building in buildings:
                 # Get the amount of the current building the user wants to blow through
@@ -1309,8 +1460,8 @@ async def on_message(message):
                     'http://www.rustlabs.com' + best_building['href'] + '#tab=destroyed-by;filter=0,1,0,0,0;sort=4,0,2')
                 # On the durability tab, get all items in the table containing explosive costs
                 all_explosives = best_building_html.find_all('tr', {"data-group": "explosive"})
-                explosive_cost += '\n\nTo get through **' + str(num_building) + ' ' + best_building.text + \
-                                  '**, you would need:'
+                embed_name = 'To get through ' + str(num_building) + ' ' + best_building.text + \
+                             ', you would need:'
                 # These two variables will be used to calculate the minimum sulfur for the current building item
                 min_sulfur = 999999
                 lowest_explosive = ''
@@ -1320,13 +1471,12 @@ async def on_message(message):
                 if sulfur_emote is None:
                     sulfur_emote = 'sulfur'
                 # Iterate through the list of all explosives and only get the data of the ones we are looking for
+                explosive_cost = ''
                 for explosive_row in all_explosives:
-                    flag = True
-                    if explosive_row.has_attr("data-group2"):
-                        # Hack to stop displaying duplicate data for hard and soft side blocks
-                        if explosive_row["data-group2"] == 'soft':
-                            flag = False
-                    if flag:
+                    # Hack to stop displaying duplicate data for hard and soft side blocks
+                    if explosive_row.has_attr("data-group2") and explosive_row["data-group2"] == 'soft':
+                        pass
+                    else:
                         # If the current row we are looking at is one of the items we are looking for,
                         # add its data to our output string
                         explosive_name = explosive_row.find('a').text
@@ -1341,7 +1491,7 @@ async def on_message(message):
                             # If the emoji isn't in the server then just use the string name
                             if explosive_emoji is None:
                                 explosive_emoji = explosive_name
-                            curr_cost = '\n\t' + str(explosive_emoji) + '\tx' + \
+                            curr_cost = '\n' + str(explosive_emoji) + '\tx' + \
                                         str(num_building * int(explosive[2].text)) + ' (' + str(curr_sulfur) + \
                                         str(sulfur_emote) + ')'
 
@@ -1351,7 +1501,7 @@ async def on_message(message):
                                 lowest_explosive = curr_cost + ' for the ' + building_name
                                 if num_building > 1:
                                     lowest_explosive += 's'
-
+                embed.add_field(name=embed_name, value=explosive_cost, inline=False)
                 # If the minimum didn't change, then the item cannot be broken
                 if min_sulfur == 999999:
                     await message.channel.send('You cannot break one or more of the items you entered')
@@ -1360,8 +1510,9 @@ async def on_message(message):
                     # Add minimum sulfur cost to the total minimum
                     total_min_sulfur += min_sulfur
                     min_sulfur_string += lowest_explosive
-            await message.channel.send(explosive_cost + '\n\nThe cheapest path would cost ' + str(total_min_sulfur) +
-                                       str(sulfur_emote) + ' by using:' + min_sulfur_string)
+            min_name = 'The cheapest path would cost ' + str(total_min_sulfur) + str(sulfur_emote) + ' by using:'
+            embed.add_field(name=min_name, value=min_sulfur_string, inline=False)
+            await message.channel.send(embed=embed)
 
 
     elif message.content.lower().startswith('!skinlist'):
@@ -1825,7 +1976,7 @@ async def on_message(message):
                         recycle_name.append(i)
                 if not recycle_name:
                     recycle_name.append(i)
-                embed=recycle(' '.join(recycle_name), 1, message.channel.guild.emojis)
+                embed = recycle(' '.join(recycle_name), 1, message.channel.guild.emojis)
                 if type(embed) is str:
                     await message.channel.send(embed)
                 else:
@@ -1891,10 +2042,12 @@ async def on_message(message):
         if len(args) == 1:
             embed = discord.Embed()
             embed.add_field(name="**!binds commands**", value="Displays all commands you can bind to a key"
-                            , inline=False)
-            embed.add_field(name="**!binds keys**", value="Displays all keys you can bind commands to", inline=False)
-            embed.add_field(name="**!binds gestures**", value="Displays all gestures you can bind", inline=False)
-            embed.add_field(name="**!binds popular**", value="Displays popular binds", inline=False)
+                            , inline=True)
+            embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+            embed.add_field(name="**!binds keys**", value="Displays all keys you can bind commands to", inline=True)
+            embed.add_field(name="**!binds gestures**", value="Displays all gestures you can bind", inline=True)
+            embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+            embed.add_field(name="**!binds popular**", value="Displays popular binds", inline=True)
             await message.channel.send("Use any of the below commands for information on various rust binds",
                                        embed=embed)
         # If there is a server argument, check if they entered 'keys' 'gestures' or 'commands'
@@ -2145,15 +2298,17 @@ async def on_message(message):
                 temp_str = str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%'
                 str_items.append(temp_str)
 
-            table_string = format_text(str_items, 3)
+            table_lines = format_text(str_items, 3)
             await message.channel.send('Displaying drop table for **' + best_container.text + '**:\n')
-            # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
-            # Split the message every 1800 characters, preserving formatting
-            messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
-            # Once the message has been split into a list, iterate through and post it as code to make it look
-            # halfway decent
-            for msg in messages:
-                await message.channel.send('```' + msg + '```')
+            # For each line we are trying to output, check if adding it would put us close to the message length
+            # limit. If we are approaching it, post the current string and start a new one
+            output_msg = ''
+            for line in table_lines:
+                if len(output_msg) + len(line) > 1900:
+                    await message.channel.send('```' + output_msg + '```')
+                    output_msg = ''
+                output_msg += line + '\n'
+            await message.channel.send('```' + output_msg + '```')
 
     # Posts a random picture from a given folder
     elif message.content.lower().startswith('!campic'):
@@ -2202,20 +2357,19 @@ async def on_message(message):
                     return
             # Once we get all of the drop data, sort it based on drop percentage
             sorted_text = sorted((key, value) for (value, key) in table_text.items())
-            str_items = []
+            str_items = {}
             for text in sorted_text:
-                str_items.append(str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%')
+                str_items[str(text[1])] = (str(text[0]) + '%')
+                # str_items.append(str(text[1]).ljust(30) + '\t' + str(text[0]).rjust(6) + '%')
 
-            table_string = format_text(str_items, 3)
-
-            await message.channel.send('Displaying drop percentages for **' + best_item.text + '**:\n')
-            # Discord's max message length is 2000. If our message exceeds that, split it up into different messages
-            # Split the message every 1900 character, preserving formatting
-            messages = textwrap.wrap(table_string, 1800, break_long_words=False, replace_whitespace=False)
-            # Once the message has been split into a list, iterate through and post it as code to make it look
-            # halfway decent
-            for msg in messages:
-                await message.channel.send('```' + msg + '```')
+            # table_lines = format_text(str_items, 3)
+            embed_title = 'Displaying drop percentages for ' + best_item.text
+            embed = discord.Embed(title=embed_title)
+            for item in str_items:
+                if (len(embed.fields) % 3) == 1:
+                    embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+                embed.add_field(name=item, value=str_items[item], inline=True)
+            await message.channel.send(embed=embed)
 
     # Output general smelting info about a certain item.
     elif message.content.lower().startswith('!smelting'):
@@ -2369,8 +2523,11 @@ async def on_message(message):
                     else:
                         embed_text = material_name + ' x' + str(quantity)
                     embed.add_field(name=embed_text, value="\n\u200b", inline=True)
-                embed.add_field(name="Condition Loss", value=cols[3].text, inline=False)
-                embed.add_field(name="Blueprint required?", value=cols[4].text, inline=False)
+                # Pad the embed fields until we are at a new row to display last stats
+                while len(embed.fields) < 3:
+                    embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+                embed.add_field(name="Condition Loss", value=cols[3].text, inline=True)
+                embed.add_field(name="Blueprint required?", value=cols[4].text, inline=True)
             except Exception as e:
                 await message.channel.send(best_item.text + ' has no repair data. Use **!repair [itemName]**')
                 return
@@ -2548,8 +2705,7 @@ async def on_message(message):
         embed = discord.Embed(title='Displaying staus of all dependent servers:')
         # Display statuses in an embed
         for status in statuses:
-            total_status = statuses[status] + ' ' + status
-            embed.add_field(name=total_status, value="\n\u200b", inline=False)
+            embed.add_field(name=status, value=statuses[status], inline=False)
 
         await message.channel.send(embed=embed)
 
