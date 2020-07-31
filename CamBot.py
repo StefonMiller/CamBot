@@ -19,11 +19,12 @@ import mysql.connector
 import asyncio
 import pyotp
 from tweepy import TweepError
-
+from timeit import default_timer as timer
 import skinml
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pandas import DataFrame
+import sqlite3
 
 updated_devblog = False
 
@@ -79,31 +80,22 @@ class Skin:
 
 
 # Get API keys from keys text file
-with open('C:/Users/Stefon/PycharmProjects/CamBot/keys.txt') as f:
+with open('keys.txt') as f:
     keys = f.read().splitlines()
     f.close()
 # Create client object for discord integration
 client = discord.Client()
 
-# Connect to the MySQL server and get the item corresponding to the best_skin found above
-with open('C:/Users/Stefon/PycharmProjects/CamBot/serverinfo.txt') as f:
-    info = f.read().splitlines()
-    f.close()
-cursor = None
+# Connect to the SQLite database
+connection = None
 try:
-    connection = mysql.connector.connect(
-        host=info[0],
-        database=info[1],
-        user=info[2],
-        password=info[3]
-    )
-
-    if connection.is_connected():
-        db_Info = connection.get_server_info()
-        cursor = connection.cursor()
+    connection = sqlite3.connect('rustdata.db')
+    cursor = connection.cursor()
 except Exception as e:
-    pass
-
+    print(e)
+finally:
+    if connection:
+        print('Successfully connected to SQLite database')
 
 # Background task used to check for website changes
 async def check():
@@ -236,7 +228,7 @@ def insert_items(items):
                 item_type = 'LR-300'
             else:
                 item_type = item_type.text
-            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date, skin_type) VALUES(%s, %s, %s, %s, %s)"
+            sql = "INSERT INTO skin (skin_name, link, initial_price, release_date, skin_type) VALUES(?, ?, ?, ?, ?)"
             val = (item_name, item_url, item_price, today, item_type)
             cursor.execute(sql, val)
             connection.commit()
@@ -279,7 +271,7 @@ async def update_items(channels, items, total_price):
             for item in items:
                 try:
                     sql = "INSERT INTO messages (message_id, channel_id, item_name, starting_price, " \
-                          "predicted_price, store_url) VALUES(%s, %s, %s, %s, %s, %s)"
+                          "predicted_price, store_url) VALUES(?, ?, ?, ?, ?, ?)"
                     temp_pr = '$' + str(item.pr)
                     val = (msg.id, channel.id, item.n, item.p, temp_pr, item.im)
                     cursor.execute(sql, val)
@@ -405,12 +397,13 @@ def craft_calc(search_term, num_crafts, guild_emojis):
             output_img = craft_html.find('img', {"class": "blueprint40"})
             try:
                 output_number = output_img.find_next_sibling()
+                if output_number.text == '':
+                    output_number = 1
+                else:
+                    output_number = int(''.join(filter(str.isdigit, output_number.text)))
             except AttributeError as e:
                 return item.text + ' has no crafting recipe'
-            if output_number.text == '':
-                output_number = 1
-            else:
-                output_number = int(''.join(filter(str.isdigit, output_number.text)))
+
             craft_name = craft_html.find('h1').text
             craft_string = 'Recipe for ' + str(num_crafts) + ' ' + craft_name
             embed = discord.Embed(title=craft_string)
@@ -1122,7 +1115,7 @@ async def on_raw_reaction_add(reaction):
         if msg:
             # Query the SQL server for the above channel and message ids. This is so older messages can also be
             # navigated when reacted to.
-            sql = "SELECT * FROM messages WHERE message_id = %s AND channel_id = %s"
+            sql = "SELECT * FROM messages WHERE message_id = ? AND channel_id = ?"
             val = (msg.id, channel.id,)
             cursor.execute(sql, val)
             pages = cursor.fetchall()
@@ -1167,12 +1160,14 @@ async def on_guild_join(guild):
 
 @client.event
 async def on_message(message):
+    message_text = message.content.lower()
+    command_start = timer()
     # Ignore messages from the bot to avoid infinite looping and ignore messages that aren't commands
-    if message.author == client.user or not message.content.lower().startswith('!'):
+    if message.author == client.user or not message_text.startswith('!'):
         return
     # Display all commands / get cambot's uptime and server stats
-    if message.content.lower().startswith('!cambot'):
-        args = message.content.lower().split()
+    if message_text.startswith('!cambot'):
+        args = message_text.split()
         if len(args) > 1 and args[1] == 'info':
             uptime = get_uptime(CAMBOT_START_TIME)
             num_servers = len(client.guilds)
@@ -1235,9 +1230,9 @@ async def on_message(message):
             await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                        '**![commandName]**\n', embed=embed)
 
-    elif message.content.lower().startswith('!durability'):
+    elif message_text.startswith('!durability'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
             await message.channel.send('This command displays the durability of a certain item. It will display the '
@@ -1342,11 +1337,11 @@ async def on_message(message):
                     item_str[0] = item_str[0].replace('Rifle AmmoSemi-Automatic Rifle', '')
                     item_str[0] = item_str[0].replace('Workbench Refill', '')
                     embed.add_field(name=item_str[0], value=embed_value, inline=True)
-        await message.channel.send(embed=embed)
+            await message.channel.send(embed=embed)
 
-    elif message.content.lower().startswith('!experiment'):
+    elif message_text.startswith('!experiment'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
             await message.channel.send('This command displays the experiment tables for each workbench. Use '
@@ -1394,9 +1389,9 @@ async def on_message(message):
                 await message.channel.send('Please enter a valid number')
                 return
 
-    elif message.content.lower().startswith('!raidcalc'):
+    elif message_text.startswith('!raidcalc'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
             await message.channel.send('This command displays the amount of rockets/c4/etc to get through a certain'
@@ -1515,9 +1510,9 @@ async def on_message(message):
             await message.channel.send(embed=embed)
 
 
-    elif message.content.lower().startswith('!skinlist'):
+    elif message_text.startswith('!skinlist'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
             await message.channel.send('This command displays aggregate skin data. Use **!skinlist -c, -e, -lp, or '
@@ -1539,7 +1534,7 @@ async def on_message(message):
                 # Get the link for each item and output it in an embed
                 i = 0
                 for s in sorted_by_price:
-                    sql = "SELECT link FROM skin WHERE skin_name = %s"
+                    sql = "SELECT link FROM skin WHERE skin_name = ?"
                     val = (s,)
                     cursor.execute(sql, val)
                     link = cursor.fetchone()[0]
@@ -1563,7 +1558,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s, price, link, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1601,7 +1596,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1621,7 +1616,7 @@ async def on_message(message):
                 i = 0
                 # Once we have the most expensive items, get their store URLs and display them in an embed
                 for s in sorted_by_price:
-                    sql = "SELECT link FROM skin WHERE skin_name = %s"
+                    sql = "SELECT link FROM skin WHERE skin_name = ?"
                     val = (s,)
                     cursor.execute(sql, val)
                     link = cursor.fetchone()[0]
@@ -1646,7 +1641,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s, price, link, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1682,7 +1677,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1724,7 +1719,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1760,7 +1755,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1802,7 +1797,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1838,7 +1833,7 @@ async def on_message(message):
                     # Insert all other items into the SQL database with corresponding message and channel ids
                     try:
                         sql = "INSERT INTO messages (message_id, channel_id, item_name, item_price, " \
-                              "store_url, img_link) VALUES(%s, %s, %s, %s, %s, %s)"
+                              "store_url, img_link) VALUES(?, ?, ?, ?, ?, ?)"
                         val = (msg.id, message.channel.id, s.n, price, s.l, thumbnail)
                         cursor.execute(sql, val)
                         connection.commit()
@@ -1869,9 +1864,9 @@ async def on_message(message):
 
 
     # Displays bandit camp wheel percentages and the chance of a certain event happening
-    elif message.content.lower().startswith('!gamble'):
+    elif message_text.startswith('!gamble'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
         if len(args) == 1:
             outcome_text = "```1\t\t\t\t48%\n" \
@@ -1933,9 +1928,9 @@ async def on_message(message):
                                        "{:.2f}".format(percentage * 100) + '%**')
 
     # Outputs recycle data for a given item and item quantity
-    elif message.content.lower().startswith('!recycle'):
+    elif message_text.startswith('!recycle'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, output a command description
         if len(args) == 1:
             await message.channel.send('This command will display the recycle output for a given item. Use '
@@ -1983,9 +1978,9 @@ async def on_message(message):
                     await message.channel.send(embed=embed)
 
     # Checks pop of frequented servers if no server argument, and searches for a specific server if specified
-    elif message.content.lower().startswith('!serverpop'):
+    elif message_text.startswith('!serverpop'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, the user did not enter a server argument
         if len(args) == 1:
             # Search the specific servers we frequent
@@ -2035,9 +2030,9 @@ async def on_message(message):
                 await message.channel.send(
                     serv_name + ' currently has ' + server_pop(url) + ' players online')
 
-    elif message.content.lower().startswith('!binds'):
+    elif message_text.startswith('!binds'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is output a command description
         if len(args) == 1:
             embed = discord.Embed()
@@ -2123,9 +2118,9 @@ async def on_message(message):
                                            'commands, or popular**')
 
     # Output skin data from the MySQL server for a given item
-    elif message.content.lower().startswith('!skindata'):
+    elif message_text.startswith('!skindata'):
         # Split the input command into a list
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, the user did not enter a server argument
         if len(args) == 1:
             # Search the specific servers we frequent
@@ -2160,8 +2155,8 @@ async def on_message(message):
             skin_initial_price = data[2]
             skin_initial_date = data[3]
             skin_type = data[4]
-            # Rearrange the date format for US convenience
-            skin_initial_date = skin_initial_date.strftime("%m-%d-%Y")
+            skin_initial_date = skin_initial_date.split('-')
+            skin_initial_date = skin_initial_date[1] + '-' + skin_initial_date[2] + '-' + skin_initial_date[0]
             # Get the current price and an image for the item
             market = Market("USD")
             current_price = market.get_lowest_price(name, AppID.RUST)
@@ -2197,7 +2192,7 @@ async def on_message(message):
 
     # Print out the latest news regarding Rust's future update
     # This is used to return news whenever the website updates
-    elif message.content.lower().startswith('!rustnews'):
+    elif message_text.startswith('!rustnews'):
         # Navigate to Rustafied.com and get the title and description of the new article
         title, desc = get_news('https://rustafied.com')
         # Embed a link to the site with the retrieved title and description
@@ -2206,42 +2201,25 @@ async def on_message(message):
 
     # Outputs a link to of the newest rust devblog. I am using an xml parser to scrape the rss feed as the
     # website was JS rendered and I could not get selerium/pyqt/anything to return all of the html that I needed
-    elif message.content.lower().startswith('!devblog'):
+    elif message_text.startswith('!devblog'):
         title, devblog_url, desc = get_devblog('https://rust.facepunch.com/rss/blog', 'Update', 'Community')
         embed = discord.Embed(title=title, url=devblog_url, description=desc)
         await message.channel.send('Newest Rust Devblog:', embed=embed)
 
     # Ouputs the drop table of a certain loot source
-    elif message.content.lower().startswith('!droptable'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!droptable'):
+        args = message_text.split()
         # Print out a table list if the user doesn't enter a specific one
         if len(args) == 1:
             embed = discord.Embed()
-            embed.add_field(name="APC Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Locked Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Outpost Scientist", value="\n\u200b", inline=True)
-            embed.add_field(name="Bandit Camp Guard", value="\n\u200b", inline=True)
-            embed.add_field(name="Medical Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Primitive Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Barrel", value="\n\u200b", inline=True)
-            embed.add_field(name="Military Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Ration Box", value="\n\u200b", inline=True)
-            embed.add_field(name="Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Military Tunnel Scientist", value="\n\u200b", inline=True)
-            embed.add_field(name="Roaming Scientist", value="\n\u200b", inline=True)
-            embed.add_field(name="Elite Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Mine Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Sunken Chest", value="\n\u200b", inline=True)
-            embed.add_field(name="Food Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Minecart", value="\n\u200b", inline=True)
-            embed.add_field(name="Sunken Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Heavy Scientist", value="\n\u200b", inline=True)
-            embed.add_field(name="Oil Barrel", value="\n\u200b", inline=True)
-            embed.add_field(name="Supply Drop", value="\n\u200b", inline=True)
-            embed.add_field(name="Helicopter Crate", value="\n\u200b", inline=True)
-            embed.add_field(name="Oil Rig Scientist", value="\n\u200b", inline=True)
-            embed.add_field(name="Tool Box", value="\n\u200b", inline=True)
-            embed.add_field(name="Vehicle Parts Toolbox", value="\n\u200b", inline=True)
+            crates = ['APC Crate', 'Locked Crate', 'Outpost Scientist', 'Bandit Camp Guard', 'Medical Crate'
+                      'Primitive Crate', 'Barrel', 'Military Crate', 'Ration Box', 'Crate', 'Military Tunnel Scientist',
+                      'Roaming Scientist', 'Elite Crate', 'Mine Crate', 'Sunken Chest', 'Food Crate', 'Minecart',
+                      'Sunken Crate', 'Heavy Scientist', 'Oil Barrel', 'Supply Drop', 'Helicopter Crate',
+                      'Oil Rig Scientist', 'Tool Box', 'Vehicle Parts Toolbox']
+            embed_value = '\n'.join(crates)
+            embed.add_field(name="\n\u200b", value=embed_value, inline=True)
+
             await message.channel.send('This command will display all items dropped from any of the following loot'
                                        ' sources along with their respective drop percentages:\n', embed=embed)
         # If the user enters a table name, search for it
@@ -2311,7 +2289,7 @@ async def on_message(message):
             await message.channel.send('```' + output_msg + '```')
 
     # Posts a random picture from a given folder
-    elif message.content.lower().startswith('!campic'):
+    elif message_text.startswith('!campic'):
         img_path = 'C:/Users/Stefon/PycharmProjects/CamBot/Cam/'
         pics = []
         # Get the filenames of all images in the directory
@@ -2325,8 +2303,8 @@ async def on_message(message):
 
 
     # Output all loot sources that give a certain item
-    elif message.content.lower().startswith('!lootfrom'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!lootfrom'):
+        args = message_text.split()
         # Print out a command description if the user doesn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will display all loot sources that drop a certain item, along '
@@ -2337,9 +2315,14 @@ async def on_message(message):
             best_item = get_item(' '.join(args[1:]))
             item_url = 'https://www.rustlabs.com' + best_item['href'] + '#tab=loot;sort=3,1,0'
             container_html = get_html(item_url)
+            item_img = 'https://www.' + container_html.find('img', {"class": "main-icon"})['src'][2:]
             # Hack for items that have stats(damage/protection values, etc.)
             item_table = container_html.find('table', {"class": "table w100 olive sorting"})
-            item_table_body = item_table.find('tbody')
+            try:
+                item_table_body = item_table.find('tbody')
+            except AttributeError as e:
+                await message.channel.send(best_item.text + ' has no loot source.')
+                return
             # For each row in the tbody, insert columns 1 and 4 as an entry into an output string. I wanted to
             # use an embed for its nice columns(which discord doesn't support as of yet) but a lot of the time there
             # were more than 25 entries which is discord's max for an embed
@@ -2365,6 +2348,7 @@ async def on_message(message):
             # table_lines = format_text(str_items, 3)
             embed_title = 'Displaying drop percentages for ' + best_item.text
             embed = discord.Embed(title=embed_title)
+            embed.set_thumbnail(url=item_img)
             for item in str_items:
                 if (len(embed.fields) % 3) == 1:
                     embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
@@ -2372,16 +2356,14 @@ async def on_message(message):
             await message.channel.send(embed=embed)
 
     # Output general smelting info about a certain item.
-    elif message.content.lower().startswith('!smelting'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!smelting'):
+        args = message_text.split()
         # Print out a command description if the user doesn't enter a second argument
         if len(args) == 1:
             embed = discord.Embed()
-            embed.add_field(name="Barbeque", value="\n\u200b", inline=True)
-            embed.add_field(name="Camp Fire", value="\n\u200b", inline=True)
-            embed.add_field(name="Furnace", value="\n\u200b", inline=True)
-            embed.add_field(name="Large Furnace", value="\n\u200b", inline=True)
-            embed.add_field(name="Small Oil Refinery", value="\n\u200b", inline=True)
+            smelters = ['Barbeque', 'Camp Fire', 'Furnace', 'Large Furnace', 'Small Oil Refinery']
+            embed_value = '\n'.join(smelters)
+            embed.add_field(name="\n\u200b", value=embed_value, inline=True)
             await message.channel.send('This command will display smelting data for a given item with '
                                        '**!smelting [itemName]** \nThe following items are currently supported:',
                                        embed=embed)
@@ -2438,8 +2420,8 @@ async def on_message(message):
             await message.channel.send(table_text)
 
     # Displays all stats pertaining to the item the user searches for
-    elif message.content.lower().startswith('!stats'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!stats'):
+        args = message_text.split()
         # Print out a command description if the user doesn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will display all stats corresponding to a given item. Use **!stats'
@@ -2484,8 +2466,8 @@ async def on_message(message):
                     embed.add_field(name=data[0].text, value=data[1].text, inline=True)
                 await message.channel.send(embed=embed)
 
-    elif message.content.lower().startswith('!repair'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!repair'):
+        args = message_text.split()
         # Print out a command description if the user doesn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will display the repair cost for a given item. Use **!repair'
@@ -2535,8 +2517,8 @@ async def on_message(message):
             await message.channel.send(embed=embed)
 
     # Outputs the most efficient furnace ratios for a specific furnace and ore type
-    elif message.content.lower().startswith('!furnaceratios'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!furnaceratios'):
+        args = message_text.split()
         # Print out a command description if the user doesn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will display the appropriate furnace ratio for the furnace and '
@@ -2589,8 +2571,8 @@ async def on_message(message):
                 await message.channel.send('You entered too few arguments. Use !furnaceratios for proper syntax')
                 return
     # Outputs how many explosives you can craft with x sulfur
-    elif message.content.lower().startswith('!sulfur'):
-        args = message.content.lower().split()
+    elif message_text.startswith('!sulfur'):
+        args = message_text.split()
         # If len(args) is 1, the user didn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will output the amount of explosives you can sauce with a given '
@@ -2612,7 +2594,7 @@ async def on_message(message):
                 await message.channel.send('', embed=sulf_calc(num_sulf, message.channel.guild))
 
     # Displays the current list of rust items for sale, along with their prices
-    elif message.content.lower().startswith('!rustitems'):
+    elif message_text.startswith('!rustitems'):
         items, total_item_price = get_rust_items('https://store.steampowered.com/itemstore/252490/browse/?filter=All')
         total_item_price = '$' + str("{:.2f}".format(total_item_price))
         # If the dictionary is empty, then the item store is having an error or is updating
@@ -2634,7 +2616,7 @@ async def on_message(message):
             for item in items:
                 try:
                     sql = "INSERT INTO messages (message_id, channel_id, item_name, starting_price, " \
-                          "predicted_price, store_url) VALUES(%s, %s, %s, %s, %s, %s)"
+                          "predicted_price, store_url) VALUES(?, ?, ?, ?, ?, ?)"
                     temp_pr = '$' + str(item.pr)
                     val = (msg.id, message.channel.id, item.n, item.p, temp_pr, item.im)
                     cursor.execute(sql, val)
@@ -2648,9 +2630,9 @@ async def on_message(message):
 
 
     # Gets the recipe for a certain item
-    elif message.content.lower().startswith('!craftcalc'):
+    elif message_text.startswith('!craftcalc'):
         craft_name = []
-        args = message.content.lower().split()
+        args = message_text.split()
         # If len(args) is 1, the user didn't enter an item name
         if len(args) == 1:
             await message.channel.send('This command will output the recipe of any item in rust that has a recipe.\n'
@@ -2694,13 +2676,13 @@ async def on_message(message):
                     await message.channel.send(embed=embed)
 
     # Tweet a message using tweepy
-    elif message.content.lower().startswith('!tweet'):
+    elif message_text.startswith('!tweet'):
         msg = '@yvngalec @AidanT5 TEST TWEET YES'
         pic = 'C:/Users/Stefon/PycharmProjects/CamBot/delete.jpg'
         await message.channel.send(tweet(msg, pic))
 
     # Get status of all servers the bot depends on with get_status
-    elif message.content.lower().startswith('!status'):
+    elif message_text.startswith('!status'):
         statuses = get_status()
         embed = discord.Embed(title='Displaying staus of all dependent servers:')
         # Display statuses in an embed
@@ -2709,14 +2691,22 @@ async def on_message(message):
 
         await message.channel.send(embed=embed)
 
-    elif message.content.lower().startswith('!addemojis'):
+    elif message_text.startswith('!addemojis'):
         result = await add_emojis(message.channel.guild)
         await message.channel.send(result)
 
-    elif message.content.lower().startswith('!removeemojis'):
+    elif message_text.startswith('!removeemojis'):
         result = await remove_emojis(message.channel.guild)
         await message.channel.send(result)
+    else:
+        return
 
-
+    command_end = timer()
+    command = message_text.split()[0]
+    command_time = command_end - command_start
+    print(command + ' execution completed in ' + str(command_time) + ' seconds')
+    cursor.execute("""INSERT INTO command_times(command_name, execution_time)
+                        VALUES(?, ?);""", (command, command_time))
+    connection.commit()
 client.loop.create_task(check())
 client.run(keys[0])
