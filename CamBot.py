@@ -4,7 +4,6 @@ import math
 import os
 import random
 import re
-import textwrap
 import urllib
 from time import strftime, gmtime, time
 import discord
@@ -25,7 +24,7 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import sqlite3
 import updater as cambot_updater
-
+import steamwebapi
 updated_devblog = False
 
 
@@ -76,7 +75,6 @@ class Skin:
         return self.pr
 
     def get_img_url(self):
-        return self.im
         return self.im
 
 
@@ -376,29 +374,43 @@ def get_status():
 # @Param thumbnail: Thumbnail of the embed.
 # @Param footer: Footer of the embed
 # @return: Embed formatted for the number of items in fields
-def format_embed(fields, title=None, title_url=None, description=None, thumbnail=None, footer=None):
+def format_embed(fields=None, title=None, title_url=None, description=None, thumbnail=None, footer=None):
     embed = discord.Embed(title=title, description=description, url=title_url)
     if thumbnail:
         embed.set_thumbnail(url=thumbnail)
     if footer:
         embed.set_footer(text=footer)
-    num_fields = len(fields)
-    num_rows = num_fields // 3
-    remaining_fields = num_fields % 3
-    names = list(fields.keys())
-    for i in range(num_rows):
-        # For each row that is divisible by 3, add 3 fields corresponding to that row
-        embed.add_field(name=names[(i * 3)], value=fields[names[(i * 3)]], inline=True)
-        embed.add_field(name=names[(i * 3) + 1], value=fields[names[(i * 3) + 1]], inline=True)
-        embed.add_field(name=names[(i * 3) + 2], value=fields[names[(i * 3) + 2]], inline=True)
-    if remaining_fields == 2:
-        embed.add_field(name=names[-2], value=fields[names[-2]], inline=True)
-        embed.add_field(name=names[-1], value=fields[names[-1]], inline=True)
-        embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
-    elif remaining_fields == 1:
-        embed.add_field(name=names[-1], value=fields[names[-1]], inline=True)
-        embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
-        embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+    if fields:
+        num_fields = len(fields)
+        num_rows = num_fields // 3
+        remaining_fields = num_fields % 3
+        names = list(fields.keys())
+        if remaining_fields == 0 or num_fields > 8:
+            for i in range(num_rows):
+                # For each row that is divisible by 3, add 3 fields corresponding to that row
+                embed.add_field(name=names[(i * 3)], value=fields[names[(i * 3)]], inline=True)
+                embed.add_field(name=names[(i * 3) + 1], value=fields[names[(i * 3) + 1]], inline=True)
+                embed.add_field(name=names[(i * 3) + 2], value=fields[names[(i * 3) + 2]], inline=True)
+            if remaining_fields == 2:
+                embed.add_field(name=names[-2], value=fields[names[-2]], inline=True)
+                embed.add_field(name=names[-1], value=fields[names[-1]], inline=True)
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+            elif remaining_fields == 1:
+                embed.add_field(name=names[-1], value=fields[names[-1]], inline=True)
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+        else:
+            num_rows = num_fields // 2
+            remaining_fields = num_fields % 2
+            for i in range(num_rows):
+                # For each row that is divisible by 3, add 3 fields corresponding to that row
+                embed.add_field(name=names[(i * 2)], value=fields[names[(i * 2)]], inline=True)
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+                embed.add_field(name=names[(i * 2) + 1], value=fields[names[(i * 2) + 1]], inline=True)
+            if remaining_fields == 1:
+                embed.add_field(name=names[-1], value=fields[names[-1]], inline=True)
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
+                embed.add_field(name="\n\u200b", value="\n\u200b", inline=True)
     return embed
 
 
@@ -502,7 +514,7 @@ def tweet(msg, pic=None):
     else:
         media = api.media_upload(pic)
         tweet = msg
-        post_result = api.update_status(status=tweet, media_ids=[media.media_id])
+        api.update_status(status=tweet, media_ids=[media.media_id])
 
     # Return successful tweet creation with timestamp
     return 'New tweet created at ' + datetime.now().strftime("%m-%d-%Y %H:%M:%S") + ' EST'
@@ -637,12 +649,12 @@ def get_html(url):
 # Gets all skins of a certain type
 # @Param type: Type of skin to look up
 # @Return: The category matching best matching type and the resulting skins of that category
-def get_skins_of_type(type):
+def get_skins_of_type(skin_type):
     # Get the skin category closest to type
     with open('C:/Users/Stefon/PycharmProjects/CamBot/skin_types.txt') as file:
         skin_type_list = file.read().splitlines()
         file.close()
-    best_skin = get_string_best_match(skin_type_list, type)
+    best_skin = get_string_best_match(skin_type_list, skin_type)
     # Select all skins of that category
     sql = "SELECT skin_name, link, initial_price, release_date, skin_img FROM skin WHERE skin_type = \"" + \
           best_skin + "\""
@@ -955,7 +967,7 @@ async def display_skinlist_embed(sorted_by_price, channel, title_string, embed_n
 # @Param position: Current location of the message we want to display
 # @Param table_name: Name of the table where the message was found
 # @Param pages: All items returned from an SQL query getting items associated with a message
-def gen_embed(curr_position, table_name, pages):
+def gen_embed(curr_position, table_name, pages, guild):
     if table_name == 'durability_messages':
         best_building = pages[0][2]
         side = pages[0][3]
@@ -1002,7 +1014,60 @@ def gen_embed(curr_position, table_name, pages):
                     embed_value += '\nSulfur cost: ' + row[5]
                 embed.add_field(name=row[2], value=embed_value, inline=True)
         return embed
+    elif table_name == 'harvest_messages':
+        best_tool = pages[0][2]
+        embed_title = 'Displaying the harvesting data for the ' + best_tool
+        item_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
+        cursor.execute(item_sql, (best_tool,))
+        item_data = cursor.fetchall()[0]
+        building_url = item_data[1]
+        item_img = item_data[0]
 
+        # Get durability data that applies to both sides
+        sql = '''SELECT DISTINCT node_name FROM harvesting WHERE item_name = ? ORDER BY resource_name ASC'''
+        cursor.execute(sql, (best_tool,))
+        harvest_nodes = cursor.fetchall()
+
+        # Create the embed and set the title, URL, image, and footer
+        embed = discord.Embed(title=embed_title, url=building_url)
+        embed.set_thumbnail(url=item_img)
+        max_pages = math.ceil(len(harvest_nodes) / 24)
+        if curr_position == 0:
+            curr_position = max_pages
+            footer_text = 'Page ' + str(max_pages) + '/' + str(max_pages)
+        else:
+            footer_text = 'Page ' + str(curr_position) + '/' + str(max_pages)
+        embed.set_footer(text=footer_text)
+
+        # Loop through the data and add it to the embed
+        for node in harvest_nodes:
+            if len(embed.fields) >= 24:
+                return embed
+            elif node in harvest_nodes[(curr_position - 1) * 24:((curr_position - 1) * 24) + 24]:
+                sql = '''SELECT resource_name, resource_quantity, time FROM harvesting WHERE item_name = ?
+                                           AND node_name = ?'''
+                cursor.execute(sql, (best_tool, node[0]))
+                resources = cursor.fetchall()
+                embed_value = ''
+                for resource in resources:
+                    embed_value += resource[1] + ' ' + str(check_emoji(guild.emojis, resource[0])) + '\n'
+                embed_value += 'Time: ' + resource[2]
+                embed.add_field(name=node[0], value=embed_value, inline=True)
+        return embed
+
+        # Loop through the data and add it to the embed
+        for row in building_data:
+
+            if len(embed.fields) >= 24:
+                # Once we fill the next page, return it
+                return embed
+            # If the current row is not in the index range of the page we are on, skip it
+            elif row in building_data[(curr_position - 1) * 24:((curr_position - 1) * 24) + 24]:
+                embed_value = 'Quantity: ' + row[3] + '\nTime: ' + row[4]
+                if row[5]:
+                    embed_value += '\nSulfur cost: ' + row[5]
+                embed.add_field(name=row[2], value=embed_value, inline=True)
+        return embed
     elif table_name == 'item_store_messages':
         # The message origin was for the new rust skins, format all data accordingly
         # Generate embed with title and data corresponding to the given skin from SQLite file
@@ -1110,7 +1175,7 @@ async def on_raw_reaction_add(reaction):
         msg = await channel.fetch_message(reaction.message_id)
         if msg:
             # Query all tables that use dynamic embeds for the message
-            tables = ['durability_messages', 'item_store_messages', 'skinlist_messages']
+            tables = ['durability_messages', 'item_store_messages', 'skinlist_messages', 'harvest_messages']
             pages = []
             # Check for the message in each table until we find it
             for table in tables:
@@ -1138,7 +1203,7 @@ async def on_raw_reaction_add(reaction):
                         # If the emoji isn't valid, return
                         return
                     # Generate a new embed, set the message to it, and return
-                    embed = gen_embed(position, table, pages)
+                    embed = gen_embed(position, table, pages, msg.channel.guild)
                     await msg.edit(embed=embed)
                     break
 
@@ -1216,9 +1281,6 @@ async def on_message(message):
             embed.add_field(name="**!cambot info**",
                             value="Displays uptime, connected servers, and a join link for Cambot",
                             inline=True)
-            embed.add_field(name="**!durability**",
-                            value="Displays durability of a certain item/building block",
-                            inline=True)
             await message.channel.send('Here is a list of commands. For more info on a specific command, use '
                                        '**![commandName]**\n', embed=embed)
 
@@ -1241,7 +1303,8 @@ async def on_message(message):
                 str_items.append(row[0].ljust(28) + '\t' + str(row[1]).rjust(6))
 
             table_lines = format_text(str_items, 3)
-            await message.channel.send('Displaying composting table for all items :\n')
+            await message.channel.send('Displaying composting table for all items. Use **!composting [itemName] '
+                                       'for data about a specific item :\n')
             # For each line we are trying to output, check if adding it would put us close to the message length
             # limit. If we are approaching it, post the current string and start a new one
             output_msg = ''
@@ -1266,25 +1329,231 @@ async def on_message(message):
             cursor.execute(sql, (best_item,))
             rows = cursor.fetchall()
 
-            img_sql = '''SELECT item_img FROM items WHERE item_name = ?'''
+            img_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
             cursor.execute(img_sql, (best_item,))
-            item_img = cursor.fetchall()[0][0]
+            data = cursor.fetchall()[0]
+            item_img = data[0]
+            item_url = data[1]
 
             title_str = 'Displaying composting data of ' + best_item
-            embed = discord.Embed(title=title_str)
+            embed = discord.Embed(title=title_str, url=item_url)
             embed.add_field(name='Compost amount', value=rows[0][1], inline=True)
             amount_per_compost = math.ceil(1 / float(rows[0][1]))
             embed.add_field(name='Amount for 1 compost', value=amount_per_compost, inline=True)
             embed.set_thumbnail(url=item_img)
             await message.channel.send(embed=embed)
 
+    elif message_text.startswith('!steamstats'):
+        args = message_text.split()
+        if len(args) == 1:
+            title = '!steamstats displays the total concurrent players of the input game at the current time'
+            description = 'Use **!steamstats [gameName]**'
+            embed = discord.Embed(title=title, description=description)
+            await message.channel.send(embed=embed)
+        else:
+            game_name = ' '.join(args[1:])
+            game_name = game_name.replace(' ', '+')
+            game_name = game_name.replace('&', '%26')
+            game_name = game_name.replace('?', '%3F')
+            url = 'https://steamcharts.com/search/?q=' + game_name
+
+            search_html = get_html(url)
+            table = search_html.find('tbody')
+            if not table:
+                title = game_name + ' has no player data'
+                await message.channel.send(title)
+
+            rows = table.find_all('tr')
+            results = {}
+
+            for row in rows:
+                game_stats = []
+                cols = row.find_all('td')
+                result_name = cols[1].find('a').text
+                players = cols[2].text
+                month_avg = cols[3].text
+                month_gain = cols[4].text
+                # Skip duplicates as they have less players
+                if result_name not in results:
+                    results[result_name] = game_stats
+                    game_stats.append(players)
+                    game_stats.append(month_avg)
+                    game_stats.append(month_gain)
+
+            best_game = get_string_best_match(results.keys(), game_name)
+
+            data = results[best_game]
+            fields = {'Current Players': data[0], 'Month Average': data[1], 'Monthly Gain/Loss': data[2]}
+            title = 'Displaying steam player data for ' + best_game
+            embed = format_embed(fields, title, None, None, None, None)
+            await message.channel.send(embed=embed)
+
     elif message_text.startswith('!harvesting'):
-        pass
+        # Split the input command into a list
+        args = message_text.split()
+        # If len(args) is 1, output a the chances for each wheel outcome and display the wheel image
+        if len(args) == 1:
+            title = '!harvesting displays how many materials you get for harvesting things with a certain tool'
+            description = 'Use **!harvesting [toolName]**'
+            embed = discord.Embed(title=title, description=description)
+            await message.channel.send(embed=embed)
+        # If the user entered arguments, get the arguments to determine what to do
+        else:
+            tool_name = ' '.join(args[1:])
+
+            with open('item_names.txt') as file:
+                item_name_list = file.read().splitlines()
+                file.close()
+            best_tool = get_string_best_match(item_name_list, tool_name)
+            # Get the item's link and image for the embed
+            embed_title = 'Displaying harvesting data for the ' + best_tool
+            item_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
+            cursor.execute(item_sql, (best_tool,))
+            item_data = cursor.fetchall()[0]
+            building_url = item_data[1]
+            item_img = item_data[0]
+
+            # Get durability data that applies to both sides
+            sql = '''SELECT DISTINCT node_name FROM harvesting WHERE item_name = ? ORDER BY resource_name ASC'''
+            cursor.execute(sql, (best_tool,))
+            harvest_nodes = cursor.fetchall()
+
+            if not harvest_nodes:
+                await message.channel.send(best_tool + ' has no harvesting data')
+                return
+
+            # Create the embed and set the title and URL
+            embed = discord.Embed(title=embed_title, url=building_url)
+            embed.set_thumbnail(url=item_img)
+
+            num_items = len(harvest_nodes)
+
+            # Loop through the data and add it to the embed
+            for node in harvest_nodes:
+                if len(embed.fields) >= 24:
+                    break
+                sql = '''SELECT resource_name, resource_quantity, time FROM harvesting WHERE item_name = ?
+                        AND node_name = ?'''
+                cursor.execute(sql, (best_tool, node[0]))
+                resources = cursor.fetchall()
+                embed_value = ''
+                for resource in resources:
+                    embed_value += resource[1] + ' ' + str(check_emoji(message.channel.guild.emojis, resource[0])) + '\n'
+                embed_value += 'Time: ' + resource[2]
+                embed.add_field(name=node[0], value=embed_value, inline=True)
+            if num_items > 24:
+                num_pages = math.ceil(num_items / 24)
+                footer_text = 'Page 1/' + str(num_pages)
+                embed.set_footer(text=footer_text)
+                msg = await message.channel.send(embed=embed)
+                # React to the message to set up navigation if there is going to be more than 1 page
+                await msg.add_reaction('◀')
+                await msg.add_reaction('▶')
+                # Insert message data into database file
+                sql = '''INSERT INTO harvest_messages (message_id, channel_id, item_name) VALUES (?, ?, ?)'''
+                cursor.execute(sql, (msg.id, message.channel.id, best_tool))
+                connection.commit()
+
+            else:
+                # If there is only one page, don't bother setting up a dynamic embed
+                await message.channel.send(embed=embed)
 
     elif message_text.startswith('!trades'):
-        pass
+        args = message_text.split()
+        # Print out a table list if the user doesn't enter a specific one
+        if len(args) == 1:
+            embed = discord.Embed(title='This command displays all trades involving a specific item.',
+                                  description = 'Use **!trades [itemName]**')
+            await message.channel.send(embed=embed)
+        # If the user enters an item name, search for it
+        else:
+            # Rejoin all args after the command name to pass it onto get_best_match
+            container_name = ' '.join(args[1:])
+
+            # Once we have the building name, search for the best matching one based on the user's search term
+            with open('item_names.txt') as file:
+                item_name_list = file.read().splitlines()
+                file.close()
+            best_item = get_string_best_match(item_name_list, container_name)
+
+            sql = '''SELECT * FROM trades WHERE give_item = ? OR receive_item = ? ORDER BY shop_name'''
+            cursor.execute(sql, (best_item, best_item))
+            trades = cursor.fetchall()
+
+            title_str = 'Displaying all trades involving ' + best_item
+            fields = {}
+
+            if not trades:
+                await message.channel.send('You cannot get ' + best_item + ' from a trade')
+                return
+
+            trade_str = ''
+            for trade in trades:
+                shop = trade[4]
+                try:
+                    fields[shop] += '\t' + trade[1] + ' ' + trade[0] + ' for ' + trade[3] + ' ' + trade[2] + '\n'
+                except KeyError:
+                    fields[shop] = '\t' + trade[1] + ' ' + trade[0] + ' for ' + trade[3] + ' ' + trade[2] + '\n'
+
+            await message.channel.send(title_str)
+
+            table_lines = []
+            for field in fields:
+                table_lines.append(field + '\n' + fields[field])
+
+            output_msg = ''
+            for line in table_lines:
+                if len(output_msg) + len(line) > 1900:
+                    await message.channel.send('```' + output_msg + '```')
+                    output_msg = ''
+                output_msg += line + '\n'
+            await message.channel.send('```' + output_msg + '```')
+
     elif message_text.startswith('!damage'):
-        pass
+        args = message_text.split()
+        # Print out a table list if the user doesn't enter a specific one
+        if len(args) == 1:
+            await message.channel.send('!trades displays damage stats for a specific item with all available'
+                                       ' ammunition. Use **!damage [itemName]**')
+        # If the user enters an item name, search for it
+        else:
+            # Rejoin all args after the command name to pass it onto get_best_match
+            item_name = ' '.join(args[1:])
+
+            # Once we have the building name, search for the best matching one based on the user's search term
+            with open('item_names.txt') as file:
+                item_name_list = file.read().splitlines()
+                file.close()
+            best_item = get_string_best_match(item_name_list, item_name)
+
+            sql = '''SELECT DISTINCT ammo_name FROM damage WHERE weapon_name = ?'''
+            cursor.execute(sql, (best_item,))
+            all_ammo = cursor.fetchall()
+
+            img_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
+            cursor.execute(img_sql, (best_item,))
+            data = cursor.fetchall()[0]
+            item_img = data[0]
+            item_url = data[1]
+
+            title_str = 'Displaying damage stats for the ' + best_item
+            fields = {}
+
+            if not all_ammo:
+                await message.channel.send(best_item + ' has no damage stats')
+                return
+
+            for ammo in all_ammo:
+                sql = '''SELECT stat_name, stat_value FROM damage WHERE ammo_name = ? AND weapon_name = ?'''
+                cursor.execute(sql, (ammo[0], best_item))
+                stats = cursor.fetchall()
+                stat_str = ''
+                for stat in stats:
+                    stat_str += stat[0] + ' ' + stat[1] + '\n'
+                fields[ammo[0]] = stat_str
+            embed = format_embed(fields, title_str, item_url, None, item_img, None)
+            await message.channel.send(embed=embed)
+
     elif message_text.startswith('!mix'):
         args = message_text.split()
         # Print out a table list if the user doesn't enter a specific one
@@ -1366,7 +1635,7 @@ async def on_message(message):
                 file.close()
             best_building = get_string_best_match(item_name_list, building_name)
             # Get the item's link and image for the embed
-            embed_title = 'Displaying the durability of ' + side + ' side ' + best_building
+            embed_title = 'Displaying the durability of a ' + side + ' side ' + best_building
             item_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
             cursor.execute(item_sql, (best_building,))
             item_data = cursor.fetchall()[0]
@@ -1579,7 +1848,7 @@ async def on_message(message):
                 sorted_by_price = {k: v for k, v in sorted(skin_price_list.items(), key=lambda ite: float(ite[1]))[:10]}
                 # Once we have a sorted dictionary, display the data and add it to the database
                 await display_skinlist_embed(sorted_by_price, message.channel,
-                                       'Displaying the 10 cheapest skins on the market:', 'Price')
+                                             'Displaying the 10 cheapest skins on the market:', 'Price')
 
             else:
                 # Get a list of objects containing all items of search_type
@@ -1599,7 +1868,7 @@ async def on_message(message):
                 sorted_by_price = {k: v for k, v in sorted(skin_price_list.items(), key=lambda ite: float(ite[1]),
                                                            reverse=True)[:10]}
                 await display_skinlist_embed(sorted_by_price, message.channel,
-                                       'Displaying the 10 most expensive skins on the market:', 'Price')
+                                             'Displaying the 10 most expensive skins on the market:', 'Price')
 
             else:
                 skin_list, best_skin = cross_reference_skins(search_type)
@@ -1620,7 +1889,7 @@ async def on_message(message):
                 # Once we have the skins, sort them by percent profit and take the 10 lowest values
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc))[:10]
                 await display_skinlist_embed(sorted_by_price, message.channel,
-                                       'Displaying the 10 skins with the worst profit:', 'Percent change')
+                                             'Displaying the 10 skins with the worst profit:', 'Percent change')
 
             else:
                 skin_list, best_skin = cross_reference_skins(search_type)
@@ -1641,7 +1910,7 @@ async def on_message(message):
                 # Once we have the list of skins, sort them by %profit and take the 10 highest values
                 sorted_by_price = sorted(skin_list, key=lambda x: float(x.pc), reverse=True)[:10]
                 await display_skinlist_embed(sorted_by_price, message.channel,
-                                       'Displaying the 10 skins with the best profit:', 'Percent change')
+                                             'Displaying the 10 skins with the best profit:', 'Percent change')
 
             else:
                 skin_list, best_skin = cross_reference_skins(' '.join(args[2:]))

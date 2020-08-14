@@ -2,8 +2,11 @@ import sqlite3
 import time
 
 import mysql.connector
+import requests
 from bs4 import BeautifulSoup
 from contextlib import closing
+import re
+from fuzzywuzzy import fuzz
 from requests import get
 from timeit import default_timer as timer
 
@@ -569,6 +572,7 @@ def update_gather_amounts(item_html):
             cols = row.find_all('td')
             node_name = cols[0]["data-value"]
             resources = cols[1].find_all('img')
+            time = cols[2].text
             # Get all resources in the 2nd column
             for resource in resources:
                 resource_name = resource["alt"]
@@ -579,12 +583,12 @@ def update_gather_amounts(item_html):
                 elif '%' not in resource_quantity:
                     # Remove all non-digits from the string
                     resource_quantity = int(''.join(filter(str.isdigit, resource_quantity)))
-
                 print('\tUpdating gather data for ' + item_name)
-                sql = '''REPLACE INTO harvesting(item_name, node_name, resource_name, resource_quantity)
-                        VALUES(?, ?, ?, ?)'''
-                sqlite_cursor.execute(sql, (item_name, node_name, resource_name, resource_quantity))
+                sql = '''REPLACE INTO harvesting(item_name, node_name, resource_name, resource_quantity, time)
+                        VALUES(?, ?, ?, ?, ?)'''
+                sqlite_cursor.execute(sql, (item_name, node_name, resource_name, resource_quantity, time))
                 sqlite_connection.commit()
+
 
 
 # Gets all recipes for the mixing table and adds them to the database
@@ -668,6 +672,32 @@ def insert_item_images(skin_name, url):
     sqlite_cursor.execute(sql, (img_div, skin_name))
     sqlite_connection.commit()
 
+# Returns the best item in str_list matching search_term. Identical to get_best_match, but this is for SQL rows
+# @Param str_list: list of rows for comparison
+# @Param search_term: search term entered
+# @Return: Best matching element in str_list
+def get_string_best_match(str_list, search_term):
+    # This could be done with fuzzywuzzy's process.extractOne module, but I could not get it to work with a different
+    # scorer than WRatio.
+    best_item_match = None
+    best_item_match_num = 0
+    for str in str_list:
+        # Get an average of multiple fuzzywuzzy scorers to get a better match. Note w is not averaged as its score
+        # Is the most valued out of the 5 scorers
+        r = fuzz.ratio(search_term, str)
+        s = fuzz.token_set_ratio(search_term, str)
+        p = fuzz.partial_ratio(search_term, str)
+        w = fuzz.WRatio(search_term, str)
+        srt = fuzz.token_sort_ratio(search_term, str)
+        temp_ratio = (r + s + p + srt) / 4 + w
+
+        if temp_ratio > best_item_match_num:
+            best_item_match = str
+            best_item_match_num = temp_ratio
+        else:
+            pass
+    return best_item_match
+
 
 def update_database():
     update_start = timer()
@@ -689,16 +719,15 @@ def update_database():
         # update_fuel_consumption(link_html)
         # update_trades(link_html)
         # update_damage_values(link_html)
-        # update_gather_amounts(link_html)
-        update_mixing_recipes(link_html)
-
+        update_gather_amounts(link_html)
+        # update_mixing_recipes(link_html)
+    # update_steam_games()
     # Update experiment tables after potentially deleting rows in the items table
     # update_experiment_tables()
     # Once all items are updated, write all names to a master text file used for string matching
     # write_item_names()
     update_end = timer()
     return ('Update finished in ' + str(update_end - update_start) + 's')
-
 
 # update_database()
 # get_aggregate_call_times()
