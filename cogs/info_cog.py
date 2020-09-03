@@ -10,6 +10,8 @@ import CamBot
 '''
 Cog used to contain commands related to Game info
 '''
+
+
 # Gets the status of all servers the CamBot is dependent on
 # @Return: List of servers and connection stats
 def get_status():
@@ -27,6 +29,7 @@ def get_status():
             server_dict[server] = '🔴 Offline'
     return server_dict
 
+
 # Returns the player count of a certain server URL on Battlemetrics.com
 # @Param server_url: - url of the server we want the player count of
 # @Return: - number of players on the server
@@ -34,6 +37,7 @@ def server_pop(server_url):
     server_html = CamBot.get_html(server_url)
     pop = server_html.find('dt', string='Player count').find_next_sibling('dd')
     return pop.text
+
 
 class Info(commands.Cog):
 
@@ -44,12 +48,18 @@ class Info(commands.Cog):
     # Displays rust bind info
     # @Param args: The kind of info on binds the user wants
     @commands.command(brief='Displays information on Rust keybinds',
-                      description='Displays bind keys, commands, etc.\nUse **binds commands, '
-                                  'keys, gestures, or popular**')
+                      description='Displays information on rust binds in 4 categories: Commands, Keys, Gestures, '
+                                  'and Popular Binds',
+                      usage='!binds commands displays all commands you can bind to a key\n'
+                            '!binds keys displays all keys you can bind commands to\n'
+                            '!binds gestures displays all gestures you can bind to a key and how to do so\n'
+                            '!binds popular displays the most popular/useful keybinds')
     async def binds(self, ctx, *, args=None):
         # If the user didn't enter any args display the command desc
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            # If no argument was entered for prefix, invoke the help command for binds
+            await ctx.invoke(self.client.get_command('help'), args='binds')
+            return
         else:
             # Displays all console commands you can use
             if args.lower() == 'commands':
@@ -124,12 +134,14 @@ class Info(commands.Cog):
     # Displays player info for a given game
     # @Param args: The game the user wants to look up
     @commands.command(brief='Displays player stats for a given game',
-                      description='Displays how many players are currently online for a given game.\nUse **'
-                                  'steamstats [gameName]**')
+                      description='Displays how many players are currently online for a given game.',
+                      usage='!steamstats <gameName>')
     async def steamstats(self, ctx, *, args=None):
         # If the user didn't enter any args, display the command desc
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            # If no argument was entered for prefix, invoke the help command for steamstats
+            await ctx.invoke(self.client.get_command('help'), args='steamstats')
+            return
         else:
             # Look up the game name on steamcharts.com. Encode URL before navigation
             game_name = args
@@ -177,8 +189,9 @@ class Info(commands.Cog):
     # Displays current players on a given Rust server
     # @Param args: The game the user wants to look up
     @commands.command(brief='Outputs player count for a given Rust server',
-                      description='Displays how many players are currently on a given Rust server.\n'
-                                  'Use **serverpop [serverName]**')
+                      description='Displays how many players are currently on a given Rust server.',
+                      usage='!serverpop for info on Bloo Lagoon and Rustafied Trio\n'
+                            '!serverpop <serverName> for information on any server')
     async def serverpop(self, ctx, *, args=None):
         # If there are no args, display server info for bloo lagoon and rustafied trio
         if not args:
@@ -231,17 +244,19 @@ class Info(commands.Cog):
 
     # Displays latest rustafied news article
     @commands.command(brief='Displays the newest Rustafied news article',
-                      description='Gets the latest Rustafied news article and posts a link to it')
+                      description='Gets the latest Rustafied news article and posts a link to it',
+                      usage='!rustnews')
     async def rustnews(self, ctx):
-            # Navigate to Rustafied.com and get the title and description of the new article
-            title, desc = CamBot.get_news('https://rustafied.com')
-            # Embed a link to the site with the retrieved title and description
-            embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
-            await ctx.send('Here is the newest Rustafied article:', embed=embed)
-            # Displays latest rustafied news article
+        # Navigate to Rustafied.com and get the title and description of the new article
+        title, desc = CamBot.get_news('https://rustafied.com')
+        # Embed a link to the site with the retrieved title and description
+        embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
+        await ctx.send('Here is the newest Rustafied article:', embed=embed)
+        # Displays latest rustafied news article
 
     @commands.command(brief='Displays the newest Rust DevBlog',
-                      description='Gets the latest devblog and posts a link to it')
+                      description='Gets the latest devblog and posts a link to it',
+                      usage='!devblog')
     async def devblog(self, ctx):
         # Outputs a link to of the newest rust devblog. I am using an xml parser to scrape the rss feed as the
         # website was JS rendered and I could not get selerium/pyqt/anything to return all of the html that I needed
@@ -251,7 +266,8 @@ class Info(commands.Cog):
 
     # Displays a pic of Cammy
     @commands.command(brief='Posts a picture of the inspiration for this bot',
-                      description='Posts a HOT picture of physical embodiment of CamBot')
+                      description='Posts a HOT picture of physical embodiment of CamBot',
+                      usage='!campic')
     async def campic(self, ctx):
         # Posts a random picture from a given folder
         img_path = 'Cam/'
@@ -267,7 +283,8 @@ class Info(commands.Cog):
 
     # Displays the status of all of CamBot's dependent servers
     @commands.command(brief='Displays the status of CamBot\'s dependent servers',
-                      description='This command will show status lights for all of the servers CamBot pulls data from')
+                      description='This command will show status lights for all of the servers CamBot pulls data from',
+                      usage='!status')
     async def status(self, ctx):
         statuses = get_status()
         embed = discord.Embed(title='Displaying staus of all dependent servers:')
@@ -276,6 +293,8 @@ class Info(commands.Cog):
             embed.add_field(name=status, value=statuses[status], inline=False)
 
         await ctx.send(embed=embed)
+
+
 # Add cogs to bot
 def setup(client):
     client.add_cog(Info(client))

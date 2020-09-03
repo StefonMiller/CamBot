@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord.ext.commands import Cog
 import json
 import os.path
+from timeit import default_timer as timer
 
 '''
 Cog used to contain commands related to Rust skins
@@ -182,13 +183,21 @@ class Skins(commands.Cog):
     # @Param args: Arguments to determine the data the user wants
     @commands.command(brief='Displays the top 10 skins in a certain category',
                       description='This command displays aggregate skin data. It will output the top 10 cheapest, '
-                                  'most expensive, least proitable, or most profitable skins on the market currently\n'
-                                  'Use **skinlist -c, -e, -lp, or -mp [itemType]** Ex: **skinlist -e assault rifle**\n'
-                                  'You can also get all skins for an item type with **skinlist [itemType]**')
+                                  'most expensive, least proitable, or most profitable skins on the market currently',
+                      usage='!skinlist -c for the 10 **cheapest** skins on the market\n'
+                            '!skinlist -c <itemType> for the 10 cheapest skins of a **certain type**\n '
+                            '!skinlist -e for the 10 **most expensive** skins on the market\n'
+                            '!skinlist -e <itemType> for the 10 most expensive skins of a **certain type**\n'
+                            '!skinlist -mp for the 10 **most profitable** on the market\n'
+                            '!skinlist -mp <itemType> for the 10 most profitable skins of a **certain type**\n'
+                            '!skinlist -lp for the 10 **least profitable** skins on the market\n'
+                            '!skinlist -lp <itemType> for the 10 least profitable skins of a **certain type**\n'
+                            '!skinlist <skinType> for **ALL** skins of a certain type')
     async def skinlist(self, ctx, *, args=None):
-        # If the user didn't enter any arguments, display the command desc
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='skinlist')
+            return
         else:
             # If the user entered arguments, split them
             args = args.split()
@@ -301,26 +310,25 @@ class Skins(commands.Cog):
     # Displays all information on a given skin name
     # @Param args: Name of the skin the user wants info on
     @commands.command(brief='Displays information for a given skin',
-                      description='This command displays price and release information for a given skin.\n'
-                                  'Use **skindata [skinName]**\n**NOTE:** All skin prices/dates are estimates. Initial'
-                                  ' price information is very innacurate for skins released a long time ago')
+                      description='This command displays price and release information for a given skin.',
+                      usage='!skindata <skinName> **Note:** for older skins release date/initial price '
+                            'information may be inaccurate')
     async def skindata(self, ctx, *, args=None):
-        # If the user didnt' enter any args, display the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            # Search the specific servers we frequent
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='skindata')
+            return
         # If there is a server argument, add any arguments after !serverpop to the server name
         else:
             # Get SQLite cursor for database interaction
             cursor = CamBot.cursor
             # If the user entered an item name, ensure it is all in one string and search for it in the database
             skin_name = args
-            # Open a text file containing a list of all rust item names and find the best match
+            # Open a text file containing a list of all rust skin names and find the best match
             with open('skins.txt') as file:
                 skin_name_list = file.read().splitlines()
                 file.close()
             best_skin = CamBot.get_string_best_match(skin_name_list, skin_name)
-
             # Once we get the best matching item string, query the item's data from the SQL server. I originally
             # queried data matching the search term using the %like% keyword and then used best_match to get the
             # best item from the query's results. However, this often led to searches that didn't return any items
@@ -372,7 +380,8 @@ class Skins(commands.Cog):
     # Displays the skins currently in the Rust item store
     @commands.command(brief='Displays the skins currently for sale on Steam',
                       description='This command displays the current skins for sale along with a predicted price for '
-                                  'each one. The predicted price may not be correct!')
+                                  'each one. The predicted price may not be correct!',
+                      usage='!rustskins')
     async def rustskins(self, ctx):
         cursor = CamBot.cursor
         connection = CamBot.connection
@@ -407,6 +416,7 @@ class Skins(commands.Cog):
             # React to the message to set up navigation
             await msg.add_reaction('◀')
             await msg.add_reaction('▶')
+
 
 # Add cogs to bot
 def setup(client):

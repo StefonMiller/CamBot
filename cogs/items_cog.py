@@ -47,8 +47,10 @@ class Items(commands.Cog):
     # Displays composting information
     # @Param args: Item the user wants composting information on
     @commands.command(brief='Composting information',
-                      description='Gives composting information for a given item with **composting [itemName]**\nGives '
-                                  'composting information on all items with **composting**')
+                      description='Displays how much compost an item gives as well as how many of a certain '
+                                  'item will make 1 compost',
+                      usage='!composting for composting information on all items\n'
+                            '!composting <itemName> for composting information on a certain item')
     async def composting(self, ctx, *, args=None):
         cursor = CamBot.cursor
         # If the user didn't enter any item to look up, display composting info for all items
@@ -122,12 +124,13 @@ class Items(commands.Cog):
     # Displays harvesting information for a given tool
     # @Param args: The tool the user wants information on
     @commands.command(brief='How many resources a tool can harvest',
-                      description='Displays how many resources a given tool harvests from various animals/trees/nodes.'
-                                  '\nUse **harvesting [toolName]**')
+                      description='Displays how many resources a given tool harvests from various animals/trees/nodes.',
+                      usage='!harvesting <toolName>')
     async def harvesting(self, ctx, *, args=None):
-        # If the user didn't enter any arguments, output the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='harvesting')
+            return
         # If the user entered arguments, get the corresponding tool
         else:
             tool_name = args
@@ -199,11 +202,13 @@ class Items(commands.Cog):
     # Displays all trades containing a certain item
     # @Param args: The item the user wants trade data on
     @commands.command(brief='Trade information at Outpost and Bandit Camp',
-                      description='Displays all trades involving a specific item.\n Use **trades [itemName]**')
+                      description='Displays all trades from Outpost and Bandit Camp involving a specific item.',
+                      usage='!trades <itemName>')
     async def trades(self, ctx, *, args=None):
-        # If the user didn't enter any item, output the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='trades')
+            return
         # If the user enters an item name, search for it
         else:
             # Get SQLite cursor for database interaction
@@ -260,12 +265,13 @@ class Items(commands.Cog):
     # Displays damage stats for a given item
     # @Param args: The item the user wants damage stats for
     @commands.command(brief='Weapon damage information',
-                      description='Displays damage values with all ammo for a given weapon.\n Use **damage '
-                                  '[weaponName]**')
+                      description='Displays damage values with all ammo for a given weapon.',
+                      usage='!damage <weaponName>')
     async def damage(self, ctx, *, args=None):
-        # If the user didn't enter any weapon name, display the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='damage')
+            return
         # If the user enters an item name, search for it
         else:
             # Get SQLite cursor for database interaction
@@ -318,11 +324,14 @@ class Items(commands.Cog):
     # @Param args: The item the user wants a mixing table recipe for
     @commands.command(brief='Mixing table recipes',
                       description='Displays the mixing table recipe for a given item.\n Use **mix [itemName] '
-                                  '[numberOfCrafts]**')
+                                  '[numberOfCrafts]**',
+                      usage='!mix <itemName> for the mixing table recipe for 1 craft of an item\n'
+                            '!mix <itemName> <numCrafts> for the mixing table recipe for multiple crafts of an item')
     async def mix(self, ctx, *, args=None):
-        # Print out a table list if the user doesn't enter a specific one
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='mix')
+            return
         # If the user enters a table name, search for it
         else:
             # Get SQLite cursor for database interaction. Initialize num_crafts to 1
@@ -392,12 +401,14 @@ class Items(commands.Cog):
     # Displays durability of buildings/items
     # @Param args: The building the user wants durability stats for
     @commands.command(brief='Durability of a building/item',
-                      description='Displays how many explosives/tools it would take to break a building/deployable.\n '
-                                  'Use **durability [buildingName]**. Use -h or -s at the end for hard/soft side walls')
+                      description='Displays how many explosives/tools it would take to break a building/deployable.',
+                      usage='!durability <buildingName> for the durability of a hard side building\n'
+                            '!durability <buildingName> <-s> for the durability of a soft side building')
     async def durability(self, ctx, *, args=None):
-        # If the user didn't enter any arguments, display the command description
-        if len(args) == 1:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+        # If the user didn't enter any arguments, invoke the help function for this command
+        if not args:
+            await ctx.invoke(self.client.get_command('help'), args='durability')
+            return
         # If the user entered arguments, look up the building/deployable
         else:
             # Initialize the building side to hard and get the SQLite cursor and connection
@@ -486,12 +497,13 @@ class Items(commands.Cog):
     # Displays experiment tables for each workbench
     # @Param args: The workbench to display the table for
     @commands.command(brief='All blueprints that can be obtained from a given workbench',
-                      description='Displays what blueprints can be obtained from a workbench via experimentation.\n '
-                                  'Use **experiment [workbenchTier]**')
+                      description='Displays what blueprints can be obtained from a workbench via experimentation.',
+                      usage='!experiment <workbenchTier>')
     async def experiment(self, ctx, *, args=None):
-        # If the user didn't enter a workbench tier, display the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='experiment')
+            return
         else:
             cursor = CamBot.cursor
             # Make sure the user entered a workbench tier
@@ -531,13 +543,15 @@ class Items(commands.Cog):
     # @Param args: A list of buildings/deployables to raid
     @commands.command(brief='Amount of explosives required to raid a base',
                       description='Calculates the amount of explosives required to raid a certain number of '
-                                  'buildings/deployables.\nUse **raidcalc [buildingName] [quantity]**\n'
-                                  'Separate different buildings with commas Ex: **raidcalc sheet door 5, stone wall 3'
-                                  '**')
+                                  'buildings/deployables.',
+                      usage='!raidcalc <buildingName> <buildingQuantity>\n'
+                            'Separate different buildings with commas. For example:\n'
+                            '!raidcalc sheet door 5, stone wall 3, armored wall')
     async def raidcalc(self, ctx, *, args=None):
-        # If the user didn't enter any buildings, display the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='raidcalc')
+            return
         else:
             # Get SQLite cursor for database connectivity
             cursor = CamBot.cursor
@@ -630,9 +644,11 @@ class Items(commands.Cog):
     # @Param args: List of outcomes
     @commands.command(brief='Odds of the Bandit Camp wheel',
                       description='Given a series of outcomes for the Bandit Camp wheel, the corresponding percent'
-                                  ' chance will be calculated.\nSeparate outcomes with commas, you can also use'
-                                  ' ! to denote the negation of a certain outcome Ex: !3 would be the odds of the '
-                                  'wheel landing on anything but 3')
+                                  ' chance will be calculated.',
+                      usage='!gamble for the chance of all outcomes at the wheel\n'
+                            '!gamble <outcomes> for the probability of a string of outcomes Ex: !gamble 1,3,3,5\n'
+                            'Use ! for the probability of an event not happening Ex: !gamble !3 is the probability of '
+                            'the wheel not landing on 3.')
     async def gamble(self, ctx, *, args=None):
         # If the user didn't input any arguments, display the general wheel odds
         if not args:
@@ -696,13 +712,14 @@ class Items(commands.Cog):
     # Calculates output of recycling an item
     # @Param args: Item name and potentially number of items
     @commands.command(brief='Resource for recycling an item(s)',
-                      description='Outputs the resources for recycling a given item.\nUse **recycle [itemName] '
-                                  '[itemQuantity]**\nIf you are only calculating for 1 item, you do not have to specify'
-                                  ' a quantity')
+                      description='Outputs the resources for recycling a given item.',
+                      usage='!recycle <itemName> for the output of recycling a single item\n'
+                            '!recycle <itemName> <quantity> for the output of recycling multiple items')
     async def recycle(self, ctx, *, args=None):
-        # If the user did not enter any arguments, display the command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='recycle')
+            return
         else:
             # Get the SQLite cursor for database connectivity and set num_items to 1
             cursor = CamBot.cursor
@@ -765,8 +782,9 @@ class Items(commands.Cog):
     # @Param args: Name of the container/NPC
     @commands.command(brief='Loot table for a given container/NPC',
                       description='Outputs all items that can drop from a container/NPC along with their respective '
-                                  'odds.\nUse **droptable [containerName]**\nFor a list of containers, use '
-                                  '**droptable**')
+                                  'odds.',
+                      usage='!droptable for a list of containers you can get the loot tables of\n'
+                            '!droptable <containerName> for the loot table of a specific container')
     async def droptable(self, ctx, *, args=None):
         # Get SQLite cursor for database interaction
         cursor = CamBot.cursor
@@ -818,11 +836,13 @@ class Items(commands.Cog):
     # Displays all containers that drop a given item
     # @Param args: Name of the item the user is looking up
     @commands.command(brief='All containers that drop a given item',
-                      description='Outputs loot sources that drop a given item.\nUse **lootfrom [itemName]**')
+                      description='Outputs loot sources that drop a given item.',
+                      usage='!lootfrom <itemName>')
     async def lootfrom(self, ctx, *, args=None):
-        # If the user doesn't enter a name, print a command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='lootfrom')
+            return
         # If the user enters an item, search for it. Get a list of all items and find the one matching the user's
         # search term(s)
         else:
@@ -860,12 +880,13 @@ class Items(commands.Cog):
     # Displays stats for a given item
     # @Param args: Name of the item the user is looking up
     @commands.command(brief='General stats for a given item',
-                      description='Displays general info as well as HP values and other information.\n'
-                                  'Use **stats [itemName]**')
+                      description='Displays general info as well as HP values and other information.',
+                      usage='!stats <itemName>')
     async def stats(self, ctx, *, args=None):
-        # Print out a command description if the user doesn't enter an item name
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='stats')
+            return
         # If the user enters an item, search for it. Get a list of all items and find the one matching the user's
         # search term(s)
         else:
@@ -915,11 +936,13 @@ class Items(commands.Cog):
     # Displays repair cost for a given item
     # @Param args: Name of the item the user is looking up
     @commands.command(brief='Repair cost for a given item',
-                      description='Displays resource cost to repair a given item.\nUse **repair [itemName]**')
+                      description='Displays resource cost to repair a given item.',
+                      usage='!repair <itemName>')
     async def repair(self, ctx, *, args=None):
-        # Print out a command description if the user doesn't enter an item name
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='repair')
+            return
         # If the user enters an item, search for it. Get a list of all items and find the one matching the user's
         # search term(s)
         else:
@@ -974,12 +997,14 @@ class Items(commands.Cog):
     # @Param args: Furnace configuration
     @commands.command(brief='Most efficient furnace layouts for smelting',
                       description='Given a furnace and ore type, the most efficient furnace layouts will be '
-                                  'displayed.\nUse **furnaceratios [small/large] [metal.sulfur]**')
+                                  'displayed.',
+                      usage='!furnaceratios <small/large> <metal/sulfur> where small/large denote small and large '
+                            'furnaces and metal/sulfur denote the ore being smelted')
     async def furnaceratios(self, ctx, *, args=None):
-        # Print out a command description if the user doesn't enter an item name
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
-
+            await ctx.invoke(self.client.get_command('help'), args='furnaceratios')
+            return
         else:
             args = args.split()
             # Check if the user entered too many or too few arguments
@@ -1035,11 +1060,13 @@ class Items(commands.Cog):
     # @Param args: Amount of sulfur
     @commands.command(brief='How many explosives can be made with a certain amount of sulfur',
                       description='Given an amount of sulfur, the number of each explosive that can be made will be '
-                                  'displayed along with leftover sulfur.\nUse **sulfur [sulfurAmount]**')
+                                  'displayed along with leftover sulfur.',
+                      usage='!sulfur <sulfurAmount>')
     async def sulfur(self, ctx, *, args=None):
-        # If len(args) is 1, the user didn't enter an item name
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='sulfur')
+            return
         else:
             num_sulf = -1
             try:
@@ -1057,13 +1084,15 @@ class Items(commands.Cog):
     # Displays the resource cost for crafting an item
     # @Param args: Item name and potentially number of items
     @commands.command(brief='Resource cost of crafting an item',
-                      description='Calculates how many resources it would cost to craft a number of items.\n'
-                                  'Use **craftcalc [itemName] [numItems]** If only crafting 1 item, you can leave '
-                                  'numItems blank')
+                      description='Calculates how many resources it would cost to craft a number of items. If the item '
+                                  'needs sulfur, the total amount of sulfur needed will be displayed as well.',
+                      usage='!craftcalc <itemName> for the recipe of a single item craft\n'
+                            '!craftcalc <itemName> <quantity> for the recipe of crafting an item multiple times')
     async def craftcalc(self, ctx, *, args=None):
-        # If the user doesn't enter any args, print a command description
+        # If the user didn't enter any arguments, invoke the help function for this command
         if not args:
-            await ctx.send(embed=discord.Embed(description=ctx.command.description))
+            await ctx.invoke(self.client.get_command('help'), args='craftcalc')
+            return
         else:
             cursor = CamBot.cursor
             # Try to convert the last word in the command to an int to test if the user entered an amount

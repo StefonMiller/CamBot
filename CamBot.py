@@ -7,7 +7,6 @@ import re
 import urllib
 from time import strftime, gmtime, time
 from urllib.error import HTTPError
-
 import discord
 import requests
 from steam_community_market import Market, AppID
@@ -72,8 +71,9 @@ with open('keys.txt') as f:
     keys = f.read().splitlines()
     f.close()
 
-# Create Bot object
-client = commands.Bot(command_prefix=get_server_prefix, help_command=None)
+# Create Bot object and set the prefix for each server. Remove the default help command and make all commands case
+# insensitive
+client = commands.Bot(command_prefix=get_server_prefix, help_command=None, case_insensitive=True)
 
 for filename in os.listdir('cogs/'):
     if filename.endswith('.py'):
@@ -602,7 +602,7 @@ def get_html(url):
             return ''
 
 
-# Generates a list of PIL images for a list of skins from the item store
+# Generates a list of PIL images for a list of skins from the item store(No longer used)
 # @Param items: List of items from the rust item store
 # @Param largest_string: Largest string found in the database. Used for padding
 # @Return: List of PIL images corresponding each item in items

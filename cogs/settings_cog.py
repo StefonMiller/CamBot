@@ -44,22 +44,26 @@ class Settings(commands.Cog):
 
     # Custom help command displayed in an embed
     # @Param args: Any arguments entered after the command name
-    @commands.command(brief='Displays this message', description='Displays all commands and a short description of '
-                                                                 'them', aliases=['cambot'])
+    @commands.command(brief='Displays this message',
+                      description='Displays all commands and a short description of them',
+                      aliases=['cambot'],
+                      usage='!help for a list of all commands\n!help <commandName> for a more detailed description on '
+                            'a specific command.')
     async def help(self, ctx, *, args=None):
         # If the user entered a command they want info on, look it up and display the command description
         if args:
             # Look up the command given by the user
             command_name = ''.join(args)
-            command = self.client.get_command(command_name)
+            input_command = self.client.get_command(command_name)
             # If the command doesn't exist, inform the user to use the help command w no args
-            if not command:
-                title_text = 'Command ' + ctx.prefix + command_name + ' not found'
+            if not input_command:
+                title_text = 'Command ' + ctx.prefix + input_command.name + ' not found'
                 description_text = 'For a list of commands, use ' + ctx.prefix + 'help'
             # If the command exists, display its information
             else:
-                title_text = 'Displaying information on ' + ctx.prefix + command_name
-                description_text = command.description
+                title_text = 'Displaying information on ' + ctx.prefix + input_command.name
+                description_text = '**Description:\n** ' + input_command.description + '\n\n**Usage:**\n' + \
+                                   input_command.usage.replace('!', ctx.prefix)
             embed = discord.Embed(title=title_text, description=description_text)
             await ctx.send(embed=embed)
         else:
@@ -86,13 +90,13 @@ class Settings(commands.Cog):
     # @Param prefix: Prefix the user wants to change to
     @commands.command(brief='Changes the server prefix',
                       description='This command changes the server prefix to any character sequence without spaces. '
-                                  'If spaces are entered, only the first character sequence will be used.\nUse '
-                                  '**changeprefix [prefix]**')
+                                  'If spaces are entered, only the first character sequence will be used.',
+                      usage='!changeprefix <prefix>. Only usable by server admins.')
     @commands.check(check_role)
     async def changeprefix(self, ctx, prefix: str = None):
         if not prefix:
-            embed = discord.Embed(description=ctx.command.description)
-            await ctx.send(embed=embed)
+            # If no argument was entered for prefix, invoke the help command for changeprefix
+            await ctx.invoke(self.client.get_command('help'), args='changeprefix')
             return
         # Open the prefix json file and change the prefix to prefix. Then write it back to the file
         prefix_path = os.path.dirname(__file__) + '/../server_prefixes.json'
@@ -107,9 +111,10 @@ class Settings(commands.Cog):
         await ctx.send('Server prefix changed to ' + prefix)
 
     # Displays information about the bot
-    @commands.command(brief='Displays information about CamBot', description='This command displays information'
-                                                                             ' on CamBot\'s uptime and the number of '
-                                                                             'servers it is connected to')
+    @commands.command(brief='Displays information about CamBot',
+                      description='This command displays information on CamBot\'s uptime and the number of servers '
+                                  'it is connected to',
+                      usage='!info')
     async def info(self, ctx):
         # Get the amount of time CamBot has been running for
         uptime = get_uptime(CamBot.get_start_time())
@@ -128,16 +133,22 @@ class Settings(commands.Cog):
         await ctx.send(embed=embed)
 
     # Adds all emojis to the server. If there is no room, it lets the user know
+    # @Check check_role: Command can only be run by server administrators
     @commands.command(brief='Adds all of CamBot\'s emojis to the server',
                       description='This command adds all(~30) emojis used by CamBot to the server. If there are not'
-                                  ' enough emoji slots, CamBot will tell you how many emoji slots you need.')
+                                  ' enough emoji slots, CamBot will tell you how many emoji slots you need.',
+                      usage='!addemojis. Only usable by server admins.')
+    @commands.check(check_role)
     async def addemojis(self, ctx):
         result = await CamBot.add_emojis(ctx.guild)
         await ctx.send(result)
 
     # Removes all emojis from the server
+    # @Check check_role: Command can only be run by server administrators
     @commands.command(brief='Removes all of CamBot\'s emojis from the server',
-                      description='This command removes all of CamBot\'s emojis from the server')
+                      description='This command removes all of CamBot\'s emojis from the server',
+                      usage='!removeemojis. Only usable by server admins.')
+    @commands.check(check_role)
     async def removeemojis(self, ctx):
         result = await CamBot.remove_emojis(ctx.guild)
         await ctx.send(result)
