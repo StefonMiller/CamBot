@@ -58,12 +58,17 @@ CAMBOT_START_TIME = datetime.now()
 
 # Gets the command prefix for the current server
 # @Param message: Message containing the id of the server whose prefix we are looking up
-# @Return: Prefix located in the server_prefix json file
+# @Return: Prefix located in the server table in the database
 def get_server_prefix(client, message):
-    with open('server_prefixes.json', 'r') as f:
-        prefixes = json.load(f)
-
-    return prefixes[str(message.guild.id)]
+    sql = '''SELECT server_prefix FROM server WHERE server_id = ?'''
+    cursor.execute(sql, (message.guild.id,))
+    prefix = cursor.fetchall()
+    # The server should always be initialized before attempting to get a server prefix but just in case initialize
+    # the server if no matching id is found in the database
+    if not prefix:
+        initialize_server(message.guild)
+        return '!'
+    return prefix[0]
 
 
 # Get API keys from keys text file
@@ -134,20 +139,12 @@ async def check():
         # when we don't need to
         if item_status == 1 or news_status == 1 or devblog_status == 1:
 
-            # Loop through all servers Cambot is connected to. For each server get the first text channel to post the
-            # update(s) to. However, if there is a text channel called 'Squaddies' then use that instead
+            # Get a list of default output channels for each server to output announcements
             channel_list = []
             for guild in client.guilds:
-                first_channel = None
-                for channel in guild.channels:
-                    if not first_channel:
-                        first_channel = channel
-                    elif channel.name.lower() == 'squaddies':
-                        first_channel = channel
-                    else:
-                        pass
-                if first_channel:
-                    channel_list.append(first_channel)
+                sql = '''SELECT default_channel_id FROM server WHERE server_id = ?'''
+                cursor.execute(sql, (guild.id,))
+                channel_list.append(cursor.fetchall()[0][0])
 
             if item_status == 1:
                 items, total_item_price = get_rust_items(
@@ -179,6 +176,71 @@ async def check():
             updated_devblog = False
 
         await asyncio.sleep(sleep_timer)
+
+
+# Returns a list of all users in voice channels in all servers connected to the client
+# @Return: A list of members currently in a voice channel of a connected server
+def get_all_users_in_voice_channels():
+    member_list = {}
+    for server in client.guilds:
+        for voice_channel in server.voice_channels:
+            for member in voice_channel.members:
+                member_list[member] = server
+    return member_list
+
+
+# Gives each user in member_list 1 scrap
+async def distribute_scrap():
+    await client.wait_until_ready()
+
+    # Get role list to be used for promotions
+    sql = '''SELECT role_cost, role_name FROM roles'''
+    cursor.execute(sql)
+    # Convert sql result to dictionary
+    roles = dict(i for i in cursor.fetchall())
+    while not client.is_closed():
+        # Get list of all users in voice channels in servers with CamBot
+        members = get_all_users_in_voice_channels()
+        for member in members:
+            guild = members[member]
+            # Get the previous scrap value for the member.
+            sql = '''SELECT scrap FROM scrap WHERE member_id = ? AND server_id = ?'''
+            cursor.execute(sql, (member.id, guild.id))
+            member_scrap = cursor.fetchall()
+
+            # If there was no previous entry for the user, set the scrap value to 1, otherwise increment the old value
+            # If we are creating an entry, assign a user the default 0 scrap role
+            if not member_scrap:
+                member_scrap = 1
+                start_role = discord.utils.get(guild.roles, name='Poor')
+
+                # If start role is null, it is because roles are not set up for the server
+                if not start_role:
+                    await create_roles(guild)
+                    return
+
+                await member.add_roles(start_role)
+            else:
+                member_scrap = member_scrap[0][0] + 1
+
+            # Insert a record if no matching one exists, otherwise update the existing record
+            sql = '''INSERT OR REPLACE INTO scrap(member_id, server_id, scrap) VALUES(?, ?, ?)'''
+            cursor.execute(sql, (member.id, guild.id, member_scrap))
+            connection.commit()
+
+            # If any member reaches a threshold for a new role, remove all previous ones and add the new one
+            if member_scrap in roles.keys():
+                # Get all current roles the member has
+                current_roles = member.roles
+                # If any of the member's current roles were created/added by CamBot, remove them
+                for role in current_roles:
+                    if role.name in roles.values():
+                        await member.remove_roles(role)
+                # Add the corresponding role to the member for their new scrap total
+                await member.add_roles(discord.utils.get(guild.roles, name=roles[member_scrap]))
+
+        print('Distributed scrap to ' + str(len(members)) + ' members')
+        await asyncio.sleep(600)
 
 
 # Checks if we are within 1 hour of normal wipe time and returns a sleep time corresponding to the answer
@@ -264,6 +326,7 @@ async def update_items(channels, items, total_price):
         price = items[0].pr
         embed.add_field(name='Predicted price(1yr)', value=price, inline=True)
         for channel in channels:
+            channel = client.get_channel(int(channel))
             await channel.send('The Rust item store has updated with new items')
             msg = await channel.send(embed=embed)
             # Insert all other items into the SQL database with corresponding message and channel ids
@@ -338,9 +401,6 @@ def check_for_updates(current_path, current_data):
             f.write(current_data)
             f.close()
         return 1
-
-
-
 
 
 # Formats a dictory of name/value embeds along with thumbnail/url data
@@ -936,6 +996,38 @@ def set_default_prefix(guild):
     return 'Prefix for Cambot set to \'!\'. To change it, use **!changeprefix**'
 
 
+# Creates all of the scrap roles for Cambot
+async def create_roles(guild):
+    # Get the roles from the database and convert the colors to discord color objects
+    sql = '''SELECT * FROM roles;'''
+    cursor.execute(sql)
+    roles = cursor.fetchall()
+    # Get current list of roles in the guild
+    current_roles = list(i.name for i in await guild.fetch_roles())
+    for role in roles:
+        # Prevent creating duplicate roles
+        if role[0] not in current_roles:
+            await guild.create_role(name=role[0], color=discord.Color(int(role[1], 0)))
+
+
+# Initializes a server's id, command prefix, and output channel
+# @Param guild: Guild we are initializing
+# @Return information on how to change default settings
+async def initialize_server(guild):
+    # Insert default values into database. Guild ID is the guild id, default prefix is !, output channel is the first
+    # text channel from top -> bottom
+    sql = '''INSERT OR REPLACE INTO server(server_id, server_prefix, default_channel_id) VALUES(?, ?, ?)'''
+    cursor.execute(sql, (guild.id, '!', guild.text_channels[0].id))
+    connection.commit()
+    # Create all emojis and roles for the bot when initializing
+    emoji_result = await add_emojis(guild)
+    await create_roles(guild)
+    return 'Cambot has been added to ' + guild.name + \
+           '!\n\tThe default prefix for commands is \'!\'. To change it, use **!changeprefix**\n\tThe default ' \
+           'channel for announcements is ' + guild.channels[0].name + '. To ' 'change it, use **!defaultchanne' \
+                                                                      'l**\n\t' + emoji_result
+
+
 @client.event
 # This function runs whenever someone joins or leaves a voice channel. I mainly made it for my personal discord server,
 # but it will work with any other server as long as they have a 'rust' voice channel and 'squaddies' text channel
@@ -1037,27 +1129,22 @@ async def on_raw_reaction_add(reaction):
 
 @client.event
 async def on_guild_join(guild):
-    await guild.text_channels[0].send('OOOO CAMBOT COMING IN HOT SPICY DICEYYY')
-    # Initialize emojis and server prefix whenever Cambot is added to the server
-    emoji_result = await add_emojis(guild)
-    prefix_result = set_default_prefix(guild)
-    # Output result of initialization to first text channel in server
-    await guild.text_channels[0].send(emoji_result + '\n' + prefix_result)
+    # Once CamBot joins a server, initialize all roles, emojis, etc and send an output message
+    result = await initialize_server(guild)
+    await guild.text_channels[0].send(result)
 
 
 @client.event
 async def on_guild_remove(guild):
-    # Remove the server's prefix from the json file when Cambot is removed
-    with open('server_prefixes.json', 'r') as f:
-        prefixes = json.load(f)
+    # Remove the server's prefix from the database when Cambot is removed
+    sql = '''DELETE FROM server WHERE server_id = ?'''
+    cursor.execute(sql, (guild.id,))
+    connection.commit()
 
-    del prefixes[str(guild.id)]
-
-    with open('server_prefixes.json', 'w') as f:
-        json.dump(prefixes, f)
 
 if __name__ == "__main__":
     pass
 
 client.loop.create_task(check())
+client.loop.create_task(distribute_scrap())
 client.run(keys[0])

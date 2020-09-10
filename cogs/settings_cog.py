@@ -98,17 +98,11 @@ class Settings(commands.Cog):
             # If no argument was entered for prefix, invoke the help command for changeprefix
             await ctx.invoke(self.client.get_command('help'), args='changeprefix')
             return
-        # Open the prefix json file and change the prefix to prefix. Then write it back to the file
-        prefix_path = os.path.dirname(__file__) + '/../server_prefixes.json'
-        with open(prefix_path, 'r') as f:
-            prefixes = json.load(f)
-
-        prefixes[str(ctx.guild.id)] = prefix
-
-        with open(prefix_path, 'w') as f:
-            json.dump(prefixes, f)
-
-        await ctx.send('Server prefix changed to ' + prefix)
+        # Set the server's prefix to the input value
+        sql = '''REPLACE INTO server(server_id, server_prefix, default_channel_id) VALUES(?, ?, ?)'''
+        CamBot.cursor.execute(sql, (ctx.guild.id, prefix, ctx.guild.channels[0].id))
+        CamBot.connection.commit()
+        await ctx.send(embed=discord.Embed(description='Server prefix changed to ' + prefix))
 
     # Displays information about the bot
     @commands.command(brief='Displays information about CamBot',
@@ -131,6 +125,29 @@ class Settings(commands.Cog):
         avatar = self.client.user.avatar_url
         embed.set_thumbnail(url=avatar)
         await ctx.send(embed=embed)
+
+    # Changes the channel CamBot uses for announcements
+    # @Check check_role: Command can only be run by server administrators
+    @commands.command(brief='Changes the text channel where CamBot posts announcements',
+                      description='This command will change the text channel CamBot uses to send announcements',
+                      usage='!defaultchannel <channelName>. Only usable by server admins.')
+    @commands.check(check_role)
+    async def defaultchannel(self, ctx, channel_name = None):
+        if not channel_name:
+            # If no argument was entered for channel_name, invoke the help command for defaultchannel
+            await ctx.invoke(self.client.get_command('help'), args='defaultchannel')
+            return
+        # Get the first text channel matching that name and set it to the default_channel_id in the database
+        new_channel = discord.utils.get(ctx.guild.text_channels, name=channel_name)
+        # If the specified channel doesn't exist, output an error message and return
+        if not new_channel:
+            await ctx.send(embed=discord.Embed(description='Text channel ' + channel_name + ' not found'))
+            return
+        # Update the server settings and inform the user that the output was changed
+        sql = '''UPDATE server SET default_channel_id = ? WHERE server_id = ?'''
+        CamBot.cursor.execute(sql, (new_channel.id, ctx.guild.id))
+        CamBot.connection.commit()
+        await ctx.send(embed=discord.Embed(description='Output channel set to ' + new_channel.name))
 
     # Adds all emojis to the server. If there is no room, it lets the user know
     # @Check check_role: Command can only be run by server administrators
