@@ -6,6 +6,7 @@ Additionally, CamBot can be used to post announcements for the most recent devbl
 CamBot creates custom emojis and roles when joining a server. If your server doesn't have room for the emotes, you don't have to use them however they make the commands look a little nicer. The roles are used for a scrap system that awards users 1 scrap for every 10 minutes they spend in a voice channel. The roles offer no additional permissions. 
 
 CamBot needs certain permissions to work. Be sure to give it all requested permissions when adding it to your server!
+
 [Add CamBot to your server](https://discord.com/oauth2/authorize?client_id=684058359686889483&permissions=1980623984&scope=bot)
 <br>
 
