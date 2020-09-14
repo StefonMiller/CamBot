@@ -1,0 +1,7 @@
+gesture wave
+gesture victory
+gesture shrug
+gesture thumbsup
+gesture chicken
+gesture hurry
+gesture whoa

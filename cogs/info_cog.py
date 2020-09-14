@@ -1,9 +1,6 @@
 import random
-
 import discord
 from discord.ext import commands
-from discord.ext.commands import Cog
-import json
 import os.path
 import CamBot
 
@@ -103,8 +100,6 @@ class Info(commands.Cog):
                 with open('bind_gestures.txt') as file:
                     key_list = file.read().splitlines()
                     file.close()
-                # Create embed for output
-                embed = discord.Embed()
                 gestures_text = "```"
                 for key in key_list:
                     gestures_text += key + '\n'
@@ -196,12 +191,12 @@ class Info(commands.Cog):
         # If there are no args, display server info for bloo lagoon and rustafied trio
         if not args:
             # Search the specific servers we frequent
-            await ctx.send('Rustafied Trio currently has ' + server_pop(
+            await ctx.send(embed=discord.Embed(description='Rustafied Trio currently has ' + server_pop(
                 'https://www.battlemetrics.com/servers/rust/2634280') + ' players online\n'
                                                                         'Bloo Lagoon currently has ' + server_pop(
                 'https://www.battlemetrics.com/servers/rust/3461363') + ' players online\n\n'
                                                                         'For specific server pop, use **!serverpop ['
-                                                                        'servername]**')
+                                                                        'servername]**'))
             # If there is a server argument, add any arguments after !serverpop to the server name
         else:
             server_name = ""
@@ -239,8 +234,8 @@ class Info(commands.Cog):
                 link = best_match['href']
                 serv_name = best_match.text
                 url = 'https://battlemetrics.com' + link
-                await ctx.send(embed=discord.Embed(description=serv_name + ' currently has ' +
-                                                               server_pop(url) + ' players online'))
+                await ctx.send(embed=discord.Embed(description=serv_name + ' currently has ' + server_pop(url)
+                                                               + ' players online'))
 
     # Displays latest rustafied news article
     @commands.command(brief='Displays the newest Rustafied news article',

@@ -1,3 +1,4 @@
+import codecs
 import sqlite3
 import time
 import mysql.connector
@@ -642,9 +643,9 @@ def write_item_names():
     sqlite_cursor.execute(get_command_names)
     names = sqlite_cursor.fetchall()
     # Format and output data to a text file
-    with open('item_names.txt', 'w') as f:
-        for name in names:
-            f.write(name[0] + '\n')
+    f = codecs.open('item_names.txt', 'w', "utf-8")
+    for name in names:
+        f.write(name[0] + '\n')
     f.close()
 
 

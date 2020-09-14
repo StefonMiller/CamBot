@@ -4,8 +4,6 @@ from time import strftime, gmtime
 
 import discord
 from discord.ext import commands
-from discord.ext.commands import Cog
-import json
 import os.path
 import CamBot
 
@@ -49,6 +47,7 @@ class Items(commands.Cog):
     @commands.command(brief='Composting information',
                       description='Displays how much compost an item gives as well as how many of a certain '
                                   'item will make 1 compost',
+                      aliases=['compost'],
                       usage='!composting for composting information on all items\n'
                             '!composting <itemName> for composting information on a certain item')
     async def composting(self, ctx, *, args=None):
@@ -125,6 +124,7 @@ class Items(commands.Cog):
     # @Param args: The tool the user wants information on
     @commands.command(brief='How many resources a tool can harvest',
                       description='Displays how many resources a given tool harvests from various animals/trees/nodes.',
+                      aliases=['harvest'],
                       usage='!harvesting <toolName>')
     async def harvesting(self, ctx, *, args=None):
         # If the user didn't enter any arguments, invoke the help function for this command
@@ -645,11 +645,11 @@ class Items(commands.Cog):
     @commands.command(brief='Odds of the Bandit Camp wheel',
                       description='Given a series of outcomes for the Bandit Camp wheel, the corresponding percent'
                                   ' chance will be calculated.',
-                      usage='!gamble for the chance of all outcomes at the wheel\n'
-                            '!gamble <outcomes> for the probability of a string of outcomes Ex: !gamble 1,3,3,5\n'
-                            'Use ! for the probability of an event not happening Ex: !gamble !3 is the probability of '
+                      usage='!banditcamp for the chance of all outcomes at the wheel\n'
+                            '!banditcamp <outcomes> for the probability of a string of outcomes Ex: !banditcamp1,3,3,5\n'
+                            'Use ! for the probability of an event not happening Ex: !banditcamp !3 is the probability of '
                             'the wheel not landing on 3.')
-    async def gamble(self, ctx, *, args=None):
+    async def banditcamp(self, ctx, *, args=None):
         # If the user didn't input any arguments, display the general wheel odds
         if not args:
             outcome_text = "```1\t\t\t\t48%\n" \
@@ -677,7 +677,7 @@ class Items(commands.Cog):
             for outcome in outcomes_list:
                 if outcome == '':
                     await ctx.send(embed=discord.Embed(description='You did not enter a number. Use something '
-                                                                   'like **!gamble 1,10,3,5**'))
+                                                                   'like **!banditcamp 1,10,3,5**'))
                     return
                 # Check if there is an exclamation mark in front of each outcome. If so, the probability should be
                 # negated(1-p)
@@ -690,7 +690,7 @@ class Items(commands.Cog):
                     outcome = int(outcome)
                 except Exception as e:
                     await ctx.send(embed=discord.Embed(description='You did not enter a number. Use something like'
-                                                                   ' **!gamble 1,1,1,1**'))
+                                                                   ' **!banditcamp 1,1,1,1**'))
                     return
                 # If the item doesn't exist in the dictionary, then the user entered something wrong
                 try:
@@ -1072,7 +1072,7 @@ class Items(commands.Cog):
             try:
                 num_sulf = int(args)
             except Exception as e:
-                pass
+                print('Sulfur is not a number')
             # If the user entered an amount, check if it is a valid amount
             if num_sulf <= 0:
                 await ctx.send(embed=discord.Embed(description='Please enter a valid number'))

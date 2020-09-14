@@ -4,6 +4,7 @@ import math
 import os
 import random
 import re
+import sys
 import urllib
 from time import strftime, gmtime, time
 from urllib.error import HTTPError
@@ -25,6 +26,16 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import sqlite3
 from discord.ext import commands
+import logging
+
+logger_flag = False
+
+if logger_flag:
+    logger = logging.getLogger('discord')
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
 
 updated_devblog = False
 
@@ -88,7 +99,7 @@ for filename in os.listdir('cogs/'):
 
 @client.event
 async def on_ready():
-    print('We have logged in as {0.user}'.format(client))
+    print('\t\tWe have logged in as {0.user}'.format(client))
 
 
 # Connect to the SQLite database
@@ -189,15 +200,51 @@ def get_all_users_in_voice_channels():
     return member_list
 
 
-# Gives each user in member_list 1 scrap
-async def distribute_scrap():
-    await client.wait_until_ready()
-
+# Checks if a user's scrap reaches a new rank threshold and promotes them if so
+# @Param member_scrap: User's new scrap value
+# @Param member: Discord Member object used to get their roles
+# @Param guild: Discord Guild object used to get all roles in the guild
+async def check_for_promotion(member_scrap, member, guild):
     # Get role list to be used for promotions
     sql = '''SELECT role_cost, role_name FROM roles'''
     cursor.execute(sql)
-    # Convert sql result to dictionary
     roles = dict(i for i in cursor.fetchall())
+    for scrap_threshold in roles.keys():
+        # If the user has more scrap than the threshold, wait until they are at a threshold they are lower than
+        if member_scrap >= scrap_threshold:
+            pass
+        # If the user has less scrap than the threshold, assign them the current role
+        else:
+            # Get all current roles the member has
+            current_roles = member.roles
+            # If any of the member's current roles were created/added by CamBot, remove them
+            for role in current_roles:
+                if role.name in roles.values():
+                    await member.remove_roles(role)
+            new_role = discord.utils.get(guild.roles, name=roles[scrap_threshold])
+            # If the new role is null, create the guild roles and try to assign it again
+            if not new_role:
+                await create_roles(guild)
+                new_role = discord.utils.get(guild.roles, name=roles[scrap_threshold])
+            # Add the corresponding role to the member for their new scrap total
+            try:
+                await member.add_roles(new_role)
+            # If there is a forbidden exception when trying to assign roles. Tell the channel owner to move CamBot's
+            # role above all of the others
+            except discord.errors.Forbidden:
+                sql = '''SELECT default_channel_id FROM server WHERE server_id = ?'''
+                cursor.execute(sql, (guild.id,))
+                channel = await client.fetch_channel(int(cursor.fetchall()[0][0]))
+                await channel.send("Cannot assign roles, please move the 'Cambot' role above the scrap "
+                                   "roles in your server settings. This happened because you removed CamBot"
+                                   " without using the !removebot command.")
+            return
+
+
+# Gives each user in member_list 1 scrap
+async def distribute_scrap():
+    await client.wait_until_ready()
+    # Convert sql result to dictionary
     while not client.is_closed():
         # Get list of all users in voice channels in servers with CamBot
         members = get_all_users_in_voice_channels()
@@ -212,14 +259,6 @@ async def distribute_scrap():
             # If we are creating an entry, assign a user the default 0 scrap role
             if not member_scrap:
                 member_scrap = 1
-                start_role = discord.utils.get(guild.roles, name='Poor')
-
-                # If start role is null, it is because roles are not set up for the server
-                if not start_role:
-                    await create_roles(guild)
-                    return
-
-                await member.add_roles(start_role)
             else:
                 member_scrap = member_scrap[0][0] + 1
 
@@ -228,16 +267,8 @@ async def distribute_scrap():
             cursor.execute(sql, (member.id, guild.id, member_scrap))
             connection.commit()
 
-            # If any member reaches a threshold for a new role, remove all previous ones and add the new one
-            if member_scrap in roles.keys():
-                # Get all current roles the member has
-                current_roles = member.roles
-                # If any of the member's current roles were created/added by CamBot, remove them
-                for role in current_roles:
-                    if role.name in roles.values():
-                        await member.remove_roles(role)
-                # Add the corresponding role to the member for their new scrap total
-                await member.add_roles(discord.utils.get(guild.roles, name=roles[member_scrap]))
+            # Assign a promotion if the user has enough scrap for one
+            await check_for_promotion(member_scrap, member, guild)
 
         print('Distributed scrap to ' + str(len(members)) + ' members')
         await asyncio.sleep(600)
@@ -258,7 +289,7 @@ def check_time():
         return 60
 
 
-# Checks if it is the first thrusday of the month and returns true if it is
+# Checks if it is the first thursday of the month and returns true if it is
 def check_day():
     nth = 1
     if date(date.today().year, date.today().month, 1).weekday() == 3:
@@ -524,7 +555,7 @@ def tweet(msg, pic=None):
         try:
             api.update_status(msg)
         except TweepError as e:
-            pass
+            print('Twitter error')
     else:
         media = api.media_upload(pic)
         tweet = msg
@@ -589,7 +620,8 @@ def get_rust_items(item_url):
     try:
         f_name = cache[0].split(',')[0]
     except Exception as e:
-        pass
+        f_name = ''
+        print('Error getting items')
 
     if not cache or (f_name != first_item_name):
         # If the data we are looking up is not cached, then look everything up and add it to the text file
@@ -796,7 +828,7 @@ async def add_emojis(guild):
 
     # If there are no missing emojis, let the user know they have all of cambots emojis
     if not missing_emojis:
-        return 'All emojis are already in the server'
+        return 'All emojis are already in the server. To remove them, use **!removeemojis**'
     else:
         # If there is space for the emojis, generate them
         if available_emojis > len(missing_emojis):
@@ -807,14 +839,13 @@ async def add_emojis(guild):
                 temp_name = name.replace('_', ' ')
                 if temp_name in missing_emojis:
                     final_name = 'cambot_' + name
-                    print('Creating emoji with name ' + final_name)
+                    print('Creating emoji with name ' + final_name + ' for guild ' + guild.name)
                     await guild.create_custom_emoji(name=final_name, image=emojis[name])
-
-            return 'Successfully created all emojis'
+            return 'Added ' + str(len(missing_emojis)) + ' emojis to the server. To remove them, use **!removeemojis**'
         # If there isn't enough space, tell the user to remove x amount of emotes
         else:
-            return 'You do not have enough emoji slots to add the emotes. Remove ' + str(len(missing_emojis)) \
-                   + ' emote(s) and try again'
+            return 'You do not have enough emoji slots to use CamBot\'s emojis. Remove ' + str(len(missing_emojis)) \
+                   + ' emote(s) and use **!addemojis**'
 
 
 # Removes all of cambot's emojis from the current guild
@@ -826,8 +857,7 @@ async def remove_emojis(guild):
     # Get emoji names for all emojis added by the bot
     img_names = []
     for f in os.listdir('img'):
-        img_names.append(f.split('.')[0])
-
+        img_names.append('.'.join(f.split('.')[:-1]).replace('.', ''))
     for emoji in emojis:
         # Remove the first word before an underscore and check if the resulting name is in the name of images
         temp_name = emoji.name.split('_')[1:]
@@ -836,6 +866,8 @@ async def remove_emojis(guild):
         if temp_name in img_names:
             print('Deleting emoji ' + temp_name)
             await emoji.delete()
+            # Sleep 2 seconds to avoid rate limit
+            await asyncio.sleep(2)
     return 'All emojis from CamBot have been removed successfully'
 
 
@@ -931,19 +963,6 @@ def gen_embed(curr_position, table_name, pages, guild):
                 embed.add_field(name=node[0], value=embed_value, inline=True)
         return embed
 
-        # Loop through the data and add it to the embed
-        for row in building_data:
-
-            if len(embed.fields) >= 24:
-                # Once we fill the next page, return it
-                return embed
-            # If the current row is not in the index range of the page we are on, skip it
-            elif row in building_data[(curr_position - 1) * 24:((curr_position - 1) * 24) + 24]:
-                embed_value = 'Quantity: ' + row[3] + '\nTime: ' + row[4]
-                if row[5]:
-                    embed_value += '\nSulfur cost: ' + row[5]
-                embed.add_field(name=row[2], value=embed_value, inline=True)
-        return embed
     elif table_name == 'item_store_messages':
         # The message origin was for the new rust skins, format all data accordingly
         # Generate embed with title and data corresponding to the given skin from SQLite file
@@ -986,7 +1005,7 @@ def set_default_prefix(guild):
         with open('server_prefixes.json', 'r') as f:
             prefixes = json.load(f)
     except Exception:
-        pass
+        print('Error setting default prefix')
 
     prefixes[str(guild.id)] = '!'
 
@@ -1012,7 +1031,7 @@ async def create_roles(guild):
 
 # Initializes a server's id, command prefix, and output channel
 # @Param guild: Guild we are initializing
-# @Return information on how to change default settings
+# @Return embed containing information on the default bot settings and how to change them
 async def initialize_server(guild):
     # Insert default values into database. Guild ID is the guild id, default prefix is !, output channel is the first
     # text channel from top -> bottom
@@ -1020,12 +1039,14 @@ async def initialize_server(guild):
     cursor.execute(sql, (guild.id, '!', guild.text_channels[0].id))
     connection.commit()
     # Create all emojis and roles for the bot when initializing
-    emoji_result = await add_emojis(guild)
     await create_roles(guild)
-    return 'Cambot has been added to ' + guild.name + \
-           '!\n\tThe default prefix for commands is \'!\'. To change it, use **!changeprefix**\n\tThe default ' \
-           'channel for announcements is ' + guild.channels[0].name + '. To ' 'change it, use **!defaultchanne' \
-                                                                      'l**\n\t' + emoji_result
+    emoji_result = await add_emojis(guild)
+    embed_title = 'CamBot has been added to ' + guild.name + '!'
+    embed_description = 'The default prefix for commands is \'!\'. To change it, use **!changeprefix**\nThe default ' \
+           'channel for announcements is ' + guild.text_channels[0].name + '. To ' 'change it, use **!defaultchannel' \
+           '**\n' + emoji_result + '\nIf you want to remove CamBot at any time, use **!removebot**'
+    embed = format_embed(None, embed_title, None, embed_description, None, None)
+    return embed
 
 
 @client.event
@@ -1130,8 +1151,11 @@ async def on_raw_reaction_add(reaction):
 @client.event
 async def on_guild_join(guild):
     # Once CamBot joins a server, initialize all roles, emojis, etc and send an output message
+    await guild.text_channels[0].send(embed=discord.Embed(description='Setting up all of CamBot\'s roles and emojis. '
+                                                                   'One sec'))
     result = await initialize_server(guild)
-    await guild.text_channels[0].send(result)
+    await guild.text_channels[0].send(embed=result)
+
 
 
 @client.event

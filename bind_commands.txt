@@ -1,0 +1,22 @@
+Open console, combatlog, bug/cheater reporter
+consoletoggle, combatlog, bugreporter
+Movement
+forward, backward, left, right, sprint, duck, jump, altlook
+Fire/ADS/Middle click
+attack, attack2, attack3
+Move to inventory slot 1,2,3, etc in hotbar
+slot1, slot2, slot3, slot4, slot5, slot6
+Open inventory, cycle to next/previous item in hotbar
+inventory.toggle, invnext, invprev
+Reload, interact, toggle flashlight
+reload, use, lighttoggle
+Talk in VOIP, open text chat, send message in chat
+voice, chat.open, chat.say [Message]
+Craft item with itemID
+craft.add itemID
+Kill character, respawn randomly, respawn in sleepingbag
+kill, respawn, respawn_sleepingbag sleepingbagID
+Volume
+audio.master, audio.game, audio.voices
+Change FOV to fovNumber
+fov.fovNumber

@@ -362,6 +362,14 @@ class Skins(commands.Cog):
                                                                       'week and cannot be placed on the market at '
                                                                       'this time.'))
                 return
+
+            # If the current price is a string, then the price was formatted with comma. Remove all $ and , and parse
+            # it to a float
+            if isinstance(current_price, str):
+                current_price = current_price.replace(',', '')
+                current_price = current_price.replace('$', '')
+                current_price = float(current_price)
+
             # Attempt to get the percent change, and if we divide by 0 somehow, just set the percent to 0
             try:
                 percent_change = "{:.2f}".format(((current_price - skin_initial_price) / skin_initial_price) * 100)
