@@ -159,8 +159,9 @@ class Settings(commands.Cog):
                       usage='!addemojis. Only usable by server admins.')
     @commands.check(check_role)
     async def addemojis(self, ctx):
+        await ctx.send(embed=discord.Embed(description='Adding emojis. This may take a minute.'))
         result = await CamBot.add_emojis(ctx.guild)
-        await ctx.send(result)
+        await ctx.send(embed=discord.Embed(description=result))
 
     # Removes all emojis from the server
     # @Check check_role: Command can only be run by server administrators
@@ -169,8 +170,9 @@ class Settings(commands.Cog):
                       usage='!removeemojis. Only usable by server admins.')
     @commands.check(check_role)
     async def removeemojis(self, ctx):
+        await ctx.send(embed=discord.Embed(description='Removing emojis. This may take a minute.'))
         result = await CamBot.remove_emojis(ctx.guild)
-        await ctx.send(result)
+        await ctx.send(embed=discord.Embed(description=result))
 
     # Performs a full update of the database from which CamBot pulls data
     # @check: Only owner of the bot can execute this command
@@ -200,7 +202,6 @@ class Settings(commands.Cog):
         # For every role cambot created, delete the role
         for role in cambot_roles:
             role = discord.utils.get(ctx.message.guild.roles, name=role)
-            print('Deleting ' + role.name)
             await role.delete()
 
         # Once done, display a goodbye message and leave the server

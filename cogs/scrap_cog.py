@@ -62,8 +62,7 @@ class Scrap(commands.Cog):
 
         recipient_scrap = recipient_scrap[0][0]
         await ctx.send(embed=discord.Embed(description=recipient.name + ' has ' + str(recipient_scrap) + ' scrap'
-                                            ' on this server.'))
-
+                                                                                                         ' on this server.'))
 
     # Allows the user to gamble their scrap on the bandit camp wheel
     @commands.command(brief='Allows you to gamble your scrap',
@@ -121,7 +120,8 @@ class Scrap(commands.Cog):
                 else:
                     end_scrap = current_scrap - scrap_amount
                     await ctx.send(embed=discord.Embed(description='The wheel landed on ' + str(outcome) + '. You '
-                                                                    'lost ' + str(scrap_amount) +
+                                                                                                           'lost ' + str(
+                        scrap_amount) +
                                                                    ' scrap.\nYour balance is now ' + str(end_scrap)))
         sql = '''UPDATE scrap SET scrap = ? WHERE member_id = ? AND server_id = ?'''
         CamBot.cursor.execute(sql, (end_scrap, user_id, server_id))
@@ -166,6 +166,10 @@ class Scrap(commands.Cog):
         if ctx.author.id == recipient_id:
             await ctx.send(embed=discord.Embed(description='You can\'t give scrap to yourself'))
             return
+        # Ensure the user can't give scrap to the bot
+        if recipient_id == self.client.user.id:
+            await ctx.send(embed=discord.Embed(description='You can\'t give scrap to me!'))
+            return
 
         # If the scrap amount is valid, subtract that amount from the user giving the scrap
         sql = '''UPDATE scrap SET scrap = ? WHERE member_id = ? AND server_id = ?'''
@@ -193,8 +197,8 @@ class Scrap(commands.Cog):
         CamBot.connection.commit()
 
         await ctx.send(embed=discord.Embed(description='You gave ' + recipient.name + ' ' + str(scrap_amount) +
-                                           ' scrap(' + str(recipient_scrap) + ' total).\nYour balance is '
-                                            + str(current_scrap) + ' scrap.'))
+                                                       ' scrap(' + str(recipient_scrap) + ' total).\nYour balance is '
+                                                       + str(current_scrap) + ' scrap.'))
         await CamBot.check_for_promotion(current_scrap, ctx.author, ctx.guild)
         await CamBot.check_for_promotion(recipient_scrap, recipient, ctx.guild)
 

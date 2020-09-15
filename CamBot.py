@@ -135,12 +135,12 @@ async def check():
         # Only check for rust item updates if we get items from the item store. If no items were returned, then
         # the store is currently updating or is having issues
         if check_item:
-            item_status = check_for_updates('data/current_skins.txt', check_item)
+            item_status = check_for_updates("skins", check_item)
         else:
             item_status = 0
-        # Check if any of the corresponding text files were updated
-        news_status = check_for_updates('data/current_news.txt', news_title)
-        devblog_status = check_for_updates('data/current_devblog.txt', devblog_title)
+        # Check if any of the corresponding items were updated
+        news_status = check_for_updates("news", news_title)
+        devblog_status = check_for_updates("devblog", devblog_title)
 
         # If any of the files were updated, get the channels to post in. This avoids finding all appropriate channels
         # when we don't need to
@@ -387,6 +387,7 @@ async def update_items(channels, items, total_price):
 async def post_devblog_update(channels, title, url, desc):
     embed = discord.Embed(title=title, url=url, description=desc)
     for channel in channels:
+        channel = client.get_channel(int(channel))
         await channel.send('A new Rust devblog has been uploaded:', embed=embed)
     tweet('A new Rust devblog has been uploaded: ' + url)
     return
@@ -399,34 +400,36 @@ async def post_devblog_update(channels, title, url, desc):
 async def post_rust_news_update(channels, title, desc):
     embed = discord.Embed(title=title, url='https://rustafied.com', description=desc)
     for channel in channels:
+        channel = client.get_channel(int(channel))
         await channel.send('Rustafied has published a new news article', embed=embed)
     tweet('Rustafied has published a news article https://rustafied.com')
     return
 
 
 # Check a website for changes
-# @Param current_path: Path to text file containing data taken from most recent update check
+# @Param update_category: Category of update we are checking for
 # @Param current_data: Data pulled from the website at the time of calling the method
 # @Return 1 or 0 depending on if the file needs updated
-def check_for_updates(current_path, current_data):
-    # Open the text file and get the most recent data
-    with open(current_path) as file:
-        check_name = file.read().splitlines()
-        file.close()
+def check_for_updates(update_category, current_data):
+    sql = '''SELECT data FROM current WHERE category = ?'''
+    cursor.execute(sql, (update_category,))
+    old_data = cursor.fetchall()
+
     # If there is no data in the text file it needs to be updated
-    if not check_name:
-        with open(current_path, 'w') as f:
-            f.write(current_data)
-            f.close()
+    if not old_data:
+        sql = '''INSERT INTO current(category, data) VALUES(?, ?)'''
+        cursor.execute(sql, (update_category, current_data))
+        connection.commit()
         return 1
+    old_data = old_data[0][0]
     # If the names match, then the list is up to date
-    elif check_name[0] == current_data:
+    if old_data == current_data:
         return 0
     # If the names do not match, then the file needs to be updated
     else:
-        with open(current_path, 'w') as f:
-            f.write(current_data)
-            f.close()
+        sql = '''UPDATE current SET data = ? WHERE category = ?'''
+        cursor.execute(sql, (current_data, update_category))
+        connection.commit()
         return 1
 
 
@@ -864,7 +867,7 @@ async def remove_emojis(guild):
             await emoji.delete()
             # Sleep 2 seconds to avoid rate limit
             await asyncio.sleep(2)
-    return 'All emojis from CamBot have been removed successfully'
+    return 'All emojis created by CamBot have been removed'
 
 
 # Generates an embed for Rust skins
@@ -1039,8 +1042,9 @@ async def initialize_server(guild):
     emoji_result = await add_emojis(guild)
     embed_title = 'CamBot has been added to ' + guild.name + '!'
     embed_description = 'The default prefix for commands is \'!\'. To change it, use **!changeprefix**\nThe default ' \
-           'channel for announcements is ' + guild.text_channels[0].name + '. To ' 'change it, use **!defaultchannel' \
-           '**\n' + emoji_result + '\nIf you want to remove CamBot at any time, use **!removebot**'
+                        'channel for announcements is ' + guild.text_channels[
+                            0].name + '. To ' 'change it, use **!defaultchannel' \
+                                      '**\n' + emoji_result + '\nIf you want to remove CamBot at any time, use **!removebot**'
     embed = format_embed(None, embed_title, None, embed_description, None, None)
     return embed
 
@@ -1148,10 +1152,9 @@ async def on_raw_reaction_add(reaction):
 async def on_guild_join(guild):
     # Once CamBot joins a server, initialize all roles, emojis, etc and send an output message
     await guild.text_channels[0].send(embed=discord.Embed(description='Setting up all of CamBot\'s roles and emojis. '
-                                                                   'One sec'))
+                                                                      'One sec'))
     result = await initialize_server(guild)
     await guild.text_channels[0].send(embed=result)
-
 
 
 @client.event
