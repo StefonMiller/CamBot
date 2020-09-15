@@ -58,73 +58,45 @@ class Info(commands.Cog):
             await ctx.invoke(self.client.get_command('help'), args='binds')
             return
         else:
-            # Displays all console commands you can use
+            embed_description = ''
+            # Set the embed description depending on what the user wants
             if args.lower() == 'commands':
-                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
-                # the next is the embed value
-                with open('bind_commands.txt') as file:
-                    key_list = file.read().splitlines()
-                    file.close()
-                # Create embed for output
-                embed = discord.Embed()
-                # Get the first line and input it in the title, then put its subsequent line in the value of the embed
-                start = 0
-                for key in key_list:
-                    if start % 2 == 0:
-                        embed.add_field(name=key, value=key_list[start + 1], inline=False)
-                    start += 1
-                await ctx.send(
-                    'Displaying all commands you can bind in console. You can bind multiple commands to a key by '
-                    'seperating them with a ;. Additionally, adding a + before a command will only activate it '
-                    'while the key is held down', embed=embed)
-            # Displays all keys currently bindable in Rust
+                embed_description = 'Displaying all commands you can bind in console. You can bind multiple ' \
+                                    'commands to a key by seperating them with a ;. Additionally, adding a + ' \
+                                    'before a command will only activate it while the key is held down'
+
             elif args.lower() == 'keys':
-                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
-                # the next is the embed value
-                with open('bind_keys.txt') as file:
-                    key_list = file.read().splitlines()
-                    file.close()
-                # Create embed for output
-                embed = discord.Embed()
-                # Get the first line and input it in the title, then put its subsequent line in the value of the embed
-                start = 0
-                for key in key_list:
-                    if start % 2 == 0:
-                        embed.add_field(name=key, value=key_list[start + 1], inline=False)
-                    start += 1
-                await ctx.send("Displaying all supported keys you can bind commands to. In Rust console, "
-                               "enter **bind [key] [command]**\n", embed=embed)
+                embed_description = 'Displaying all supported keys you can bind commands to. In Rust console, enter ' \
+                                    '**bind [key] [command]**\n'
+
             elif args.lower() == 'gestures':
-                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
-                # the next is the embed value
-                with open('bind_gestures.txt') as file:
-                    key_list = file.read().splitlines()
-                    file.close()
-                gestures_text = "```"
-                for key in key_list:
-                    gestures_text += key + '\n'
-                gestures_text += '```'
-                await ctx.send("Displaying all gestures. In Rust console, enter **bind [key] \" gesture"
-                               " [gestureName]\"** Make sure you include the quotes!\n" + gestures_text)
+                embed_description = 'Displaying all gestures. In Rust console, enter **bind [key] \" gesture' \
+                                    ' [gestureName]\"** Make sure you include the quotes!\n'
+
             elif args.lower() == 'popular':
-                # Open text file and get all lines. The txt file is structured so the first line is an embed title and
-                # the next is the embed value
-                with open('binds_popular.txt') as file:
-                    key_list = file.read().splitlines()
-                    file.close()
-                # Create embed for output
-                embed = discord.Embed()
-                # Get the first line and input it in the title, then put its subsequent line in the value of the embed
-                start = 0
-                for key in key_list:
-                    if start % 2 == 0:
-                        embed.add_field(name=key, value=key_list[start + 1], inline=False)
-                    start += 1
-                await ctx.send(
-                    'Displaying the most popular binds', embed=embed)
+                embed_description = 'Displaying the most popular binds'
+
+            # If the user entered something invalid, display an error message and return
             else:
                 await ctx.send(embed=discord.Embed(description='You did not enter a valid command. Use **binds keys,'
                                                                ' gestures, commands, or popular**'))
+                return
+
+            sql = '''SELECT bind_title, bind_value FROM binds WHERE bind_category = ?'''
+            CamBot.cursor.execute(sql, (args.lower(),))
+            binds = CamBot.cursor.fetchall()
+
+            # If no binds were found, display an error message
+            if not binds:
+                await ctx.send(embed=discord.Embed(description='No binds found for ' + args.lower()))
+                return
+
+            # Convert data from database to a dict and create an embed with it
+            fields = dict(i for i in binds)
+            embed = discord.Embed(description=embed_description)
+            for field in fields:
+                embed.add_field(name=field, value=fields[field], inline=False)
+            await ctx.send(embed=embed)
 
     # Displays player info for a given game
     # @Param args: The game the user wants to look up

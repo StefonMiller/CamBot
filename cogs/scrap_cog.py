@@ -157,17 +157,21 @@ class Scrap(commands.Cog):
                                                                                                'server'))
             return
 
+        # Since the user argument is in the form of a mention, the format is <@!ID>. So we remove the <@!> and parse
+        # the ID into an it so we can get the member from the ID
+        recipient_id = int(user[3:-1])
+        recipient = ctx.guild.get_member(recipient_id)
+
+        # Ensure the user can't give themselves scrap
+        if ctx.author.id == recipient_id:
+            await ctx.send(embed=discord.Embed(description='You can\'t give scrap to yourself'))
+            return
+
         # If the scrap amount is valid, subtract that amount from the user giving the scrap
         sql = '''UPDATE scrap SET scrap = ? WHERE member_id = ? AND server_id = ?'''
         CamBot.cursor.execute(sql, ((current_scrap - scrap_amount), ctx.author.id, ctx.guild.id))
         CamBot.connection.commit()
         current_scrap = current_scrap - scrap_amount
-
-
-        # Since the user argument is in the form of a mention, the format is <@!ID>. So we remove the <@!> and parse
-        # the ID into an it so we can get the member from the ID
-        recipient_id = int(user[3:-1])
-        recipient = ctx.guild.get_member(recipient_id)
 
         # Check if the recipient has any scrap on the server
         sql = '''SELECT scrap FROM scrap WHERE member_id = ? AND server_id = ?'''

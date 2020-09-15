@@ -45,12 +45,12 @@ class PriceSkin:
 # @Return: A dictionary filled with skin data for every item
 def get_skin_prices():
     # Open file containing API keys
-    with open('bitskins_keys.txt') as f:
+    with open('data/keys.txt') as f:
         lines = f.read().splitlines()
         f.close()
     # Use API keys to connect to the api and send a request for skin prices
-    api_key = lines[0]
-    secret = lines[1]
+    api_key = lines[5]
+    secret = lines[6]
     my_secret = secret
     my_token = pyotp.TOTP(my_secret)
     r = requests.get(
@@ -160,7 +160,7 @@ def cross_reference_skins(skin_type=''):
 def get_skins_of_type(skin_type):
     cursor = CamBot.cursor
     # Get the skin category closest to type
-    with open('skin_types.txt') as file:
+    with open('data/skin_types.txt') as file:
         skin_type_list = file.read().splitlines()
         file.close()
     best_skin = CamBot.get_string_best_match(skin_type_list, skin_type)
@@ -325,7 +325,7 @@ class Skins(commands.Cog):
             # If the user entered an item name, ensure it is all in one string and search for it in the database
             skin_name = args
             # Open a text file containing a list of all rust skin names and find the best match
-            with open('skins.txt') as file:
+            with open('data/skins.txt') as file:
                 skin_name_list = file.read().splitlines()
                 file.close()
             best_skin = CamBot.get_string_best_match(skin_name_list, skin_name)

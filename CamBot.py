@@ -6,22 +6,18 @@ import random
 import re
 import sys
 import urllib
-from time import strftime, gmtime, time
 from urllib.error import HTTPError
 import discord
 import requests
-from steam_community_market import Market, AppID
 from requests import get
 from contextlib import closing
 from bs4 import BeautifulSoup
 import tweepy
-from datetime import datetime, date, timedelta, time
+from datetime import datetime, date
 from fuzzywuzzy import fuzz
 import asyncio
-import pyotp
 from tweepy import TweepError
-from timeit import default_timer as timer
-import skinml
+from skinML import skinml
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import sqlite3
@@ -83,7 +79,7 @@ def get_server_prefix(client, message):
 
 
 # Get API keys from keys text file
-with open('keys.txt') as f:
+with open('data/keys.txt') as f:
     keys = f.read().splitlines()
     f.close()
 
@@ -139,12 +135,12 @@ async def check():
         # Only check for rust item updates if we get items from the item store. If no items were returned, then
         # the store is currently updating or is having issues
         if check_item:
-            item_status = check_for_updates('current_skins.txt', check_item)
+            item_status = check_for_updates('data/current_skins.txt', check_item)
         else:
             item_status = 0
         # Check if any of the corresponding text files were updated
-        news_status = check_for_updates('current_news.txt', news_title)
-        devblog_status = check_for_updates('current_devblog.txt', devblog_title)
+        news_status = check_for_updates('data/current_news.txt', news_title)
+        devblog_status = check_for_updates('data/current_devblog.txt', devblog_title)
 
         # If any of the files were updated, get the channels to post in. This avoids finding all appropriate channels
         # when we don't need to
@@ -328,7 +324,7 @@ def insert_items(items):
             print('Successfully inserted ' + item_name)
             # Once we insert the items, we know it is not a duplicate entry and can insert the name into our text file
             # containing all skin names
-            with open('skins.txt', "a") as file:
+            with open('data/skins.txt', "a") as file:
                 file.write(item_name + '\n')
                 print('Added ' + item_name + ' to text file')
         except Exception as e:
@@ -612,7 +608,7 @@ def get_rust_items(item_url):
     # Check if the items we are attempting to get data on are cached or not
     first_item_name = item_divs[0].find('div', {"class": "item_def_name ellipsis"}).text
     # Open the file containing the cached item data and get the first item name
-    with open("cached_items.txt") as file:
+    with open("data/cached_items.txt") as file:
         cache = file.read().splitlines()
         file.close()
     # Get the first item name from the cache. If cache is null, simply pass as our next if statement will check if it
@@ -626,7 +622,7 @@ def get_rust_items(item_url):
     if not cache or (f_name != first_item_name):
         # If the data we are looking up is not cached, then look everything up and add it to the text file
         print('Items not cached...')
-        with open("cached_items.txt", 'w') as f:
+        with open("data/cached_items.txt", 'w') as f:
             item_list = []
             total_price = 0
             for i in item_divs:
@@ -1066,7 +1062,7 @@ async def on_voice_state_update(member, before, after):
             # Print a leaving message
             else:
                 leave_string = ''
-                with open('leavestrings.txt') as leave:
+                with open('data/leavestrings.txt') as leave:
                     leave_strings = leave.read().splitlines()
                     leave_string = random.choice(leave_strings)
                     f.close()
@@ -1093,7 +1089,7 @@ async def on_voice_state_update(member, before, after):
             pass
         else:
             join_string = ''
-            with open('joinstrings.txt') as join:
+            with open('data/joinstrings.txt') as join:
                 join_strings = join.read().splitlines()
                 join_string = random.choice(join_strings)
                 f.close()

@@ -88,7 +88,7 @@ class Items(commands.Cog):
             item_name = args
 
             # Once we have the item name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
@@ -137,7 +137,7 @@ class Items(commands.Cog):
             cursor = CamBot.cursor
             connection = CamBot.connection
             # Get the closest item match to what the user entered
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_tool = CamBot.get_string_best_match(item_name_list, tool_name)
@@ -158,7 +158,7 @@ class Items(commands.Cog):
             # If there is no data, display an error message and return
             if not harvest_nodes:
                 embed_description = best_tool + ' has no harvesting data'
-                embed = discord.Embed(embed_description)
+                embed = discord.Embed(description=embed_description)
                 await ctx.send(embed=embed)
                 return
 
@@ -217,7 +217,7 @@ class Items(commands.Cog):
             item_name = args
 
             # Once we have the item, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
@@ -280,7 +280,7 @@ class Items(commands.Cog):
             item_name = args
 
             # Once we have the weapon name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
@@ -341,7 +341,7 @@ class Items(commands.Cog):
             try:
                 # Try to convert the last argument to an int and set it to num_crafts. If that fails then there was
                 # no argument for the number
-                num_crafts = int(args[-1])
+                num_crafts = int(args.split()[-1])
                 # Ensure the number entered is valid
                 if args[-1] <= 0:
                     await ctx.send(embed=discord.Embed(description='Please enter a valid number'))
@@ -353,7 +353,7 @@ class Items(commands.Cog):
                 item_name = args
 
             # Once we have the item name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
@@ -430,7 +430,7 @@ class Items(commands.Cog):
                 # If there is no flag, make the building name all args except the first
                 building_name = ' '.join(args)
 
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_building = CamBot.get_string_best_match(item_name_list, building_name)
@@ -588,7 +588,7 @@ class Items(commands.Cog):
 
                 building_name = ' '.join(building_name)
                 # Once we have the building name, search for the best matching one based on the user's search term
-                with open('item_names.txt') as file:
+                with open('data/item_names.txt') as file:
                     item_name_list = file.read().splitlines()
                     file.close()
                 best_building = CamBot.get_string_best_match(item_name_list, building_name)
@@ -735,7 +735,7 @@ class Items(commands.Cog):
                 item_name = ' '.join(args)
 
             # Once we have the building name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             item = CamBot.get_string_best_match(item_name_list, item_name)
@@ -804,7 +804,7 @@ class Items(commands.Cog):
             container_name = args
 
             # Once we have the crate name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_container = CamBot.get_string_best_match(item_name_list, container_name)
@@ -850,7 +850,7 @@ class Items(commands.Cog):
             container_name = args
 
             # Once we have the building name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, container_name)
@@ -894,7 +894,7 @@ class Items(commands.Cog):
             search_name = args
 
             # Once we have the building name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, search_name)
@@ -950,7 +950,7 @@ class Items(commands.Cog):
             search_name = args
 
             # Once we have the building name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, search_name)
@@ -1108,7 +1108,7 @@ class Items(commands.Cog):
                 item_name = ' '.join(args)
 
             # Once we have the building name, search for the best matching one based on the user's search term
-            with open('item_names.txt') as file:
+            with open('data/item_names.txt') as file:
                 item_name_list = file.read().splitlines()
                 file.close()
             item = CamBot.get_string_best_match(item_name_list, item_name)

@@ -10,15 +10,12 @@ from fuzzywuzzy import fuzz
 from requests import get
 from timeit import default_timer as timer
 
-sqlite_connection = None
+
 try:
     sqlite_connection = sqlite3.connect('rustdata.db')
     sqlite_cursor = sqlite_connection.cursor()
 except Exception as e:
     print(e)
-finally:
-    if sqlite_connection:
-        print('Successfully connected to SQLite database')
 
 
 # Gets a BeautifulSoup html object from a given url, and prints out an error if there was an error connecting
@@ -33,11 +30,13 @@ def get_html(url):
         else:
             return ''
 
+'''
+DEPRECIATED - ONLY USED FOR SQLITE MIGRATION AND COMMAND OPTIMIZATION
 
-# Moves all data from the 'messages' table of the AWS SQL server to the local SQLite file
+Moves all data from the 'messages' table of the AWS SQL server to the local SQLite file
 def migrate_database_messages():
     # Connect to the MySQL server
-    with open('serverinfo.txt') as f:
+    with open('serverinfo.data') as f:
         info = f.read().splitlines()
         f.close()
     cursor = None
@@ -66,10 +65,10 @@ def migrate_database_messages():
     sqlite_connection.commit()
 
 
-# Moves all data from the 'skin' table of the AWS SQL server to the local SQLite file
+Moves all data from the 'skin' table of the AWS SQL server to the local SQLite file
 def migrate_database_skins():
     # Connect to the MySQL server
-    with open('serverinfo.txt') as f:
+    with open('serverinfo.data') as f:
         info = f.read().splitlines()
         f.close()
     cursor = None
@@ -96,10 +95,9 @@ def migrate_database_skins():
         sqlite_cursor.execute("""INSERT INTO skin(skin_name, link, initial_price, release_date, skin_type)
                                 VALUES(?, ?, ?, ?, ?);""", (row[0], row[1], row[2], row[3], row[4]))
     sqlite_connection.commit()
-
-
-# Queries the SQLite database for call time data with the AVG aggregate function. Formats data and adds it to a text
-# file
+    
+    Queries the SQLite database for call time data with the AVG aggregate function. Formats data and adds it to a text
+file
 def get_aggregate_call_times():
     # Get avg call time from db entries
     get_command_names = """SELECT DISTINCT command_name FROM command_times ORDER BY execution_time ASC"""
@@ -107,7 +105,7 @@ def get_aggregate_call_times():
     sqlite_cursor.execute(get_command_names)
     names = sqlite_cursor.fetchall()
     # Format and output data to a text file
-    with open('commandinfo.txt', 'w') as f:
+    with open('commandinfo.data', 'w') as f:
         for name in names:
             get_avg = """SELECT AVG(execution_time) FROM command_times WHERE command_name = ?"""
             sqlite_cursor.execute(get_avg, name)
@@ -115,6 +113,11 @@ def get_aggregate_call_times():
             temp = [name[0], avg]
             f.write(''.join(word.rjust(20) for word in temp))
     f.close()
+'''
+
+
+
+
 
 
 # Returns the link of each item we are going to attempt to add to the database
@@ -525,18 +528,31 @@ def update_damage_values(item_html):
         damage_table_head_cols = damage_tab.find('thead').find_all('th')
         # Get the table in the damage tab
         damage_table = damage_tab.find('tbody').find_all('tr')
+
         # Get the stats of each ammo in the table
         for ammo in damage_table:
             cols = ammo.find_all('td')
-            ammo_name = cols[1]["data-value"]
-            # Get all columns after the name and add their stat names and values to the db
-            for i in range(len(cols[2:])):
-                stat_value = cols[i + 2].text
-                stat_name = damage_table_head_cols[i + 1].text
-                print('\tUpdating damage values for ' + item_name)
-                sql = '''REPLACE INTO damage (weapon_name, ammo_name, stat_name, stat_value) VALUES(?, ?, ?, ?)'''
-                sqlite_cursor.execute(sql, (item_name, ammo_name, stat_name, stat_value))
-                sqlite_connection.commit()
+            # If the first column in the table has the text melee or throw, add it to the database as a melee weapon
+            if cols[0].text == 'Melee' or cols[0].text == 'Throw':
+                melee_type = cols[0]["data-value"]
+                for i in range(len(cols[1:])):
+                    stat_value = cols[i + 1].text
+                    stat_name = damage_table_head_cols[i + 1].text
+                    print('\tUpdating damage values for ' + item_name)
+                    sql = '''REPLACE INTO damage (weapon_name, ammo_name, stat_name, stat_value) VALUES(?, ?, ?, ?)'''
+                    sqlite_cursor.execute(sql, (item_name, melee_type, stat_name, stat_value))
+                    sqlite_connection.commit()
+            # If the stat is not melee related, add it as an ammo value
+            else:
+                ammo_name = cols[1]["data-value"]
+                # Get all columns after the name and add their stat names and values to the db
+                for i in range(len(cols[2:])):
+                    stat_value = cols[i + 2].text
+                    stat_name = damage_table_head_cols[i + 1].text
+                    print('\tUpdating damage values for ' + item_name)
+                    sql = '''REPLACE INTO damage (weapon_name, ammo_name, stat_name, stat_value) VALUES(?, ?, ?, ?)'''
+                    sqlite_cursor.execute(sql, (item_name, ammo_name, stat_name, stat_value))
+                    sqlite_connection.commit()
 
 
 # Updates table containing compost values
@@ -643,7 +659,7 @@ def write_item_names():
     sqlite_cursor.execute(get_command_names)
     names = sqlite_cursor.fetchall()
     # Format and output data to a text file
-    f = codecs.open('item_names.txt', 'w', "utf-8")
+    f = codecs.open('data/item_names.txt', 'w', "utf-8")
     for name in names:
         f.write(name[0] + '\n')
     f.close()
@@ -703,7 +719,6 @@ def update_database():
     update_start = timer()
     # Get the url of every item we are going to add to the database
     item_links = get_item_names()
-    # print(item_links)
     # Updating composting table should only take place once
     update_compost_table()
     # Update data for each item
@@ -728,8 +743,8 @@ def update_database():
     update_end = timer()
     return ('Update finished in ' + str(update_end - update_start) + 's')
 
+# Uncomment to update database without function call
 # update_database()
-# get_aggregate_call_times()
 
 if __name__ == "__main__":
     pass
