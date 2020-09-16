@@ -236,7 +236,9 @@ class Info(commands.Cog):
     # Displays a pic of Cammy
     @commands.command(brief='Posts a picture of the inspiration for this bot',
                       description='Posts a HOT picture of physical embodiment of CamBot',
-                      usage='!campic')
+                      usage='!campic',
+                      hidden=True)
+    @commands.is_owner()
     async def campic(self, ctx):
         # Posts a random picture from a given folder
         img_path = 'Cam/'
