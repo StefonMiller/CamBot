@@ -10,25 +10,21 @@ CamBot needs certain permissions to work. Be sure to give it all requested permi
 [Add CamBot to your server](https://discord.com/oauth2/authorize?client_id=684058359686889483&permissions=1980623984&scope=bot)
 <br>
 
-# Info Commands
-Info commands are used for general info about CamBot and Rust.
-* **binds**
-  * The binds command is used to display all of the bindable actions and keys in Rust. There is also the ability to display the most popular binds used by players.
-* **steamstats**
-  * The steamstats command is used to display current player stats for a given game. It displays current players, the montly average, and the monthly gain/loss for a given game.
-* **serverpop**
-  * The serverpop command displays the current server population for any of the Rust servers.
-* **rustnews**
-  * The rustnews command posts the most current Rustafied news article pertaining to the upcoming Rust update. Additionally, CamBot will post these news updates as soon as they are posted and post a tweet.
-* **devblog**
-  * The devblog command posts the most current devblog from FacePunch's website. CamBot will post devblog updates as soon as they are uploaded(within 60 seconds of publishing) and post a tweet.
-* **status**
-  * The status command displays the network status of all servers CamBot uses to get information. A bad network status for a given server **does not** mean the bot won't work.
+# Skins Commands
+Skins commands are used to get information on any skin in Rust.
+* **skinlist**
+ * The skinlist command is used to get aggregate skin data. For example, you can get the top 10 most expensive skins on the market, or the 10 least profitable skins. It can also be used to get all skins for a certain item
+* **skindata**
+ * Displays information(release date, initial price, profit) for a given skin
+* **rustskins**
+ * Displays all skins currently on the Rust item store with a predicted price(1 year from release) based off of the prices of all other skins. CamBot will make an automatic announcement and tweet whenever the item store updates.
 <br>
 
 # Item Commmands
 Item commands are used for getting information on all items in Rust.
 
+* **craftcalc**
+ * The craftcalc command calculates the crafting cost of a given item
 * **composting**
  * The composting command retrieves information on how much compost each food item yields.
 * **harvesting**
@@ -61,18 +57,22 @@ Item commands are used for getting information on all items in Rust.
  * The furnaceratios command posts images of the most efficient furnace layouts for both large and small furnaces
 * **sulfur**
  * The sulfur command calculates how many explosives you can craft with a given amount of sulfur
-* **craftcalc**
- * The craftcalc command calculates the crafting cost of a given item
 <br>
 
-# Skins Commands
-Skins commands are used to get information on any skin in Rust.
-* **skinlist**
- * The skinlist command is used to get aggregate skin data. For example, you can get the top 10 most expensive skins on the market, or the 10 least profitable skins. It can also be used to get all skins for a certain item
-* **skindata**
- * Displays information(release date, initial price, profit) for a given skin
-* **rustskins**
- * Displays all skins currently on the Rust item store with a predicted price(1 year from release) based off of the prices of all other skins. CamBot will make an automatic announcement and tweet whenever the item store updates.
+# Info Commands
+Info commands are used for general info about CamBot and Rust.
+* **binds**
+  * The binds command is used to display all of the bindable actions and keys in Rust. There is also the ability to display the most popular binds used by players.
+* **steamstats**
+  * The steamstats command is used to display current player stats for a given game. It displays current players, the montly average, and the monthly gain/loss for a given game.
+* **serverpop**
+  * The serverpop command displays the current server population for any of the Rust servers.
+* **rustnews**
+  * The rustnews command posts the most current Rustafied news article pertaining to the upcoming Rust update. Additionally, CamBot will post these news updates as soon as they are posted and post a tweet.
+* **devblog**
+  * The devblog command posts the most current devblog from FacePunch's website. CamBot will post devblog updates as soon as they are uploaded(within 60 seconds of publishing) and post a tweet.
+* **status**
+  * The status command displays the network status of all servers CamBot uses to get information. A bad network status for a given server **does not** mean the bot won't work.
 <br>
 
 # Settings Commands
