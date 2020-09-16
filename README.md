@@ -17,8 +17,10 @@ Skins commands are used to get information on any skin in Rust.
 ![](https://github.com/StefonMiller/CamBot/blob/master/gif/skinlist.gif)
 * **skindata**
  * Displays information(release date, initial price, profit) for a given skin
+![](https://github.com/StefonMiller/CamBot/blob/master/gif/skindata.gif)
 * **rustskins**
  * Displays all skins currently on the Rust item store with a predicted price(1 year from release) based off of the prices of all other skins. CamBot will make an automatic announcement and tweet whenever the item store updates.
+ ![](https://github.com/StefonMiller/CamBot/blob/master/gif/rustskins.gif)
 <br>
 
 # Item Commmands
@@ -42,14 +44,17 @@ Item commands are used for getting information on all items in Rust.
  * The experiment command outputs what item blueprints you can get from experimenting at a given workbench
 * **raidcalc**
  * The raidcalc command calculates how many explosives you would need to raid a base
+![](https://github.com/StefonMiller/CamBot/blob/master/gif/raidcalc.gif)
 * **banditcamp**
  * The banditcamp command calculates the odds of a sequence of outcomes at the wheel occurring
 * **recycle**
  * The recycle command displays the output of recycling a given item
 * **droptable**
  * The droptable command outputs all items that drop from a crate/NPC and the chance for each item
+![](https://github.com/StefonMiller/CamBot/blob/master/gif/droptable.gif)
 * **lootfrom**
  * The lootfrom command outputs all loot sources that drop a given item
+![](https://github.com/StefonMiller/CamBot/blob/master/gif/lootfrom.gif)
 * **stats**
  * The stats command displays all general stats(HP, stack size, etc) for a given item
 * **repair**
