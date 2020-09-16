@@ -14,7 +14,7 @@ CamBot needs certain permissions to work. Be sure to give it all requested permi
 Skins commands are used to get information on any skin in Rust.
 * **skinlist**
  * The skinlist command is used to get aggregate skin data. For example, you can get the top 10 most expensive skins on the market, or the 10 least profitable skins. It can also be used to get all skins for a certain item
-![] (https://github.com/StefonMiller/CamBot/blob/master/gif/skinlist.gif)
+![](https://github.com/StefonMiller/CamBot/blob/master/gif/skinlist.gif)
 * **skindata**
  * Displays information(release date, initial price, profit) for a given skin
 * **rustskins**
