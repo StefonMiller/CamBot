@@ -22,8 +22,6 @@ Info commands are used for general info about CamBot and Rust.
   * The rustnews command posts the most current Rustafied news article pertaining to the upcoming Rust update. Additionally, CamBot will post these news updates as soon as they are posted and post a tweet.
 * **devblog**
   * The devblog command posts the most current devblog from FacePunch's website. CamBot will post devblog updates as soon as they are uploaded(within 60 seconds of publishing) and post a tweet.
-* **campic**
-  * The campic command is used to post a picture of Camrich, the inspiration for this bot
 * **status**
   * The status command displays the network status of all servers CamBot uses to get information. A bad network status for a given server **does not** mean the bot won't work.
 <br>
