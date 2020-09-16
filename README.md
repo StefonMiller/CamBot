@@ -98,6 +98,7 @@ Settings commands are mostly administrative commands used to configure CamBot
  
 # Scrap Commands
 CamBot comes with a scrap system that members can use to get different roles. The roles give no additional permissions and are more of a status symbol.
+
 ![](https://github.com/StefonMiller/CamBot/blob/master/gif/scrap.gif)
 * **balance**
  * The balance command is used to get a member's current scrap balance
