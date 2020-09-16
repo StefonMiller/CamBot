@@ -164,6 +164,11 @@ def get_skins_of_type(skin_type):
         skin_type_list = file.read().splitlines()
         file.close()
     best_skin = CamBot.get_string_best_match(skin_type_list, skin_type)
+
+    # If there is no fuzzy string match, return null
+    if not best_skin:
+        return None, None
+
     # Select all skins of that category
     sql = "SELECT skin_name, link, initial_price, release_date, skin_img FROM skin WHERE skin_type = \"" + \
           best_skin + "\""
@@ -358,7 +363,7 @@ class Skins(commands.Cog):
             # able to be listed
             if not current_price:
                 await ctx.send(embed=discord.Embed(description=name + ' has no market price data at the moment. '
-                                                                      'This probably means the skin came out this '
+                                                                      'This may be because the skin came out this '
                                                                       'week and cannot be placed on the market at '
                                                                       'this time.'))
                 return

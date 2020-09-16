@@ -48,13 +48,23 @@ class Scrap(commands.Cog):
 
         # Since the user argument is in the form of a mention, the format is <@!ID>. So we remove the <@!> and parse
         # the ID into an it so we can get the member from the ID
-        recipient_id = int(user[3:-1])
-        recipient = ctx.guild.get_member(recipient_id)
+        try:
+            recipient_id = int(user[3:-1])
+            recipient = ctx.guild.get_member(recipient_id)
+        except Exception as e:
+            print(e)
+            await ctx.send(embed=discord.Embed(description='You did not mention a valid user. Be sure to @ the user '
+                                                           'for their balance.'))
+            return
 
         # Check if the recipient has any scrap on the server
         sql = '''SELECT scrap FROM scrap WHERE member_id = ? AND server_id = ?'''
         CamBot.cursor.execute(sql, (recipient_id, ctx.guild.id))
         recipient_scrap = CamBot.cursor.fetchall()
+
+        if not recipient:
+            await ctx.send(embed=discord.Embed(description='You did not mention a valid user.'))
+            return
 
         if not recipient_scrap:
             await ctx.send(embed=discord.Embed(description=recipient.name + ' has no scrap on this server yet'))
@@ -159,8 +169,14 @@ class Scrap(commands.Cog):
 
         # Since the user argument is in the form of a mention, the format is <@!ID>. So we remove the <@!> and parse
         # the ID into an it so we can get the member from the ID
-        recipient_id = int(user[3:-1])
-        recipient = ctx.guild.get_member(recipient_id)
+        try:
+            recipient_id = int(user[3:-1])
+            recipient = ctx.guild.get_member(recipient_id)
+        except Exception as e:
+            print(e)
+            await ctx.send(embed=discord.Embed(description='You did not mention a valid user. Be sure to @ the user '
+                                                           'to give them scrap.'))
+            return
 
         # Ensure the user can't give themselves scrap
         if ctx.author.id == recipient_id:
@@ -181,6 +197,10 @@ class Scrap(commands.Cog):
         sql = '''SELECT scrap FROM scrap WHERE member_id = ? AND server_id = ?'''
         CamBot.cursor.execute(sql, (recipient_id, ctx.guild.id))
         recipient_scrap = CamBot.cursor.fetchall()
+
+        if not recipient:
+            await ctx.send(embed=discord.Embed(description='You did not mention a valid user.'))
+            return
 
         # If the user doesn't have any scrap, create an entry for them and assign them the 'poor' role
         if not recipient_scrap:

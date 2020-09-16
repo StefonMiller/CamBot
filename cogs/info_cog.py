@@ -124,6 +124,7 @@ class Info(commands.Cog):
             if not table:
                 description = game_name + ' has no player data'
                 await ctx.send(embed=discord.Embed(description=description))
+                return
 
             rows = table.find_all('tr')
             results = {}
@@ -198,8 +199,9 @@ class Info(commands.Cog):
                     servers.append(i.find('a'))
             # Find the best match given the new list of servers and all search terms
             best_match = CamBot.get_best_match(servers, server_name)
+
             # If get_best_match returns an empty string, there was no matching server
-            if best_match == '':
+            if not best_match or best_match == '':
                 await ctx.send(embed=discord.Embed(description='Server not found'))
             # If we did find a server, get the link from the html element and get its pop via server_pop
             else:

@@ -93,6 +93,10 @@ class Items(commands.Cog):
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
 
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No composting data found for ' + item_name))
+                return
+
             # Get the item's composting data along with an image and link to its rustlabs page
             sql = '''SELECT * FROM composting WHERE item_name = ?'''
             cursor.execute(sql, (best_item,))
@@ -142,6 +146,10 @@ class Items(commands.Cog):
                 file.close()
             best_tool = CamBot.get_string_best_match(item_name_list, tool_name)
 
+            # If there is no fuzzy string match, display an error message and return
+            if not best_tool:
+                await ctx.send(embed=discord.Embed(description='No tool found for ' + tool_name))
+                return
             # Get the item's link and image for the embed
             embed_title = 'Displaying harvesting data for the ' + best_tool
             item_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
@@ -150,7 +158,7 @@ class Items(commands.Cog):
             item_url = item_data[1]
             item_img = item_data[0]
 
-            # Get item's durability information
+            # Get item's harvesting information
             sql = '''SELECT DISTINCT node_name FROM harvesting WHERE item_name = ? ORDER BY resource_name ASC'''
             cursor.execute(sql, (best_tool,))
             harvest_nodes = cursor.fetchall()
@@ -222,6 +230,10 @@ class Items(commands.Cog):
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
 
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No trade data found for ' + item_name))
+                return
+
             # Get all trade data for the given item
             sql = '''SELECT * FROM trades WHERE give_item = ? OR receive_item = ? ORDER BY shop_name'''
             cursor.execute(sql, (best_item, best_item))
@@ -284,6 +296,10 @@ class Items(commands.Cog):
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
+
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No damage stats found for ' + item_name))
+                return
 
             # Get the damage stats, item image, and item URL for the item returned from get_string_best_match
             sql = '''SELECT DISTINCT ammo_name FROM damage WHERE weapon_name = ?'''
@@ -357,6 +373,10 @@ class Items(commands.Cog):
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, item_name)
+
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No mixing recipe found for ' + item_name))
+                return
 
             # Get mixing data on the item
             sql = '''SELECT * FROM mixing WHERE item_name = ?'''
@@ -434,6 +454,11 @@ class Items(commands.Cog):
                 item_name_list = file.read().splitlines()
                 file.close()
             best_building = CamBot.get_string_best_match(item_name_list, building_name)
+
+            # If there is no fuzzy string match, display an error message and return
+            if not best_building:
+                await ctx.send(embed=discord.Embed(description='No building/deployable found for ' + building_name))
+                return
 
             # Get the item's link and image for the embed
             embed_title = 'Displaying the durability of a ' + side + ' side ' + best_building
@@ -592,6 +617,11 @@ class Items(commands.Cog):
                     item_name_list = file.read().splitlines()
                     file.close()
                 best_building = CamBot.get_string_best_match(item_name_list, building_name)
+
+                if not best_building:
+                    await ctx.send(embed=discord.Embed(description='One of the building names you entered is invalid '))
+                    return
+
                 # Get explosive data for the specified building
                 sql = '''SELECT tool_name, tool_quantity, tool_sulfur_cost FROM durability WHERE item_name = ? 
                         AND  (item_side = "hard" OR item_side = "both") 
@@ -740,6 +770,10 @@ class Items(commands.Cog):
                 file.close()
             item = CamBot.get_string_best_match(item_name_list, item_name)
 
+            if not item:
+                await ctx.send(embed=discord.Embed(description='No recycling data found for ' + item_name))
+                return
+
             # Once we find the appropriate item, get its recycle data from the database
             sql = '''SELECT * FROM recycle WHERE item_name = ?'''
             cursor.execute(sql, (item,))
@@ -809,6 +843,10 @@ class Items(commands.Cog):
                 file.close()
             best_container = CamBot.get_string_best_match(item_name_list, container_name)
 
+            if not best_container:
+                await ctx.send(embed=discord.Embed(description='No drop table found for ' + container_name))
+                return
+
             sql = '''SELECT * FROM droptable WHERE crate_name = ? ORDER BY percent_chance DESC'''
             cursor.execute(sql, (best_container,))
             rows = cursor.fetchall()
@@ -855,6 +893,10 @@ class Items(commands.Cog):
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, container_name)
 
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No loot sources found for ' + container_name))
+                return
+
             img_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
             cursor.execute(img_sql, (best_item,))
             data = cursor.fetchall()[0]
@@ -898,6 +940,10 @@ class Items(commands.Cog):
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, search_name)
+
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No stats found for ' + search_name))
+                return
 
             img_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
             cursor.execute(img_sql, (best_item,))
@@ -954,6 +1000,10 @@ class Items(commands.Cog):
                 item_name_list = file.read().splitlines()
                 file.close()
             best_item = CamBot.get_string_best_match(item_name_list, search_name)
+
+            if not best_item:
+                await ctx.send(embed=discord.Embed(description='No repair data found for ' + search_name))
+                return
 
             img_sql = '''SELECT item_img, url FROM items WHERE item_name = ?'''
             cursor.execute(img_sql, (best_item,))
@@ -1072,7 +1122,8 @@ class Items(commands.Cog):
             try:
                 num_sulf = int(args)
             except Exception as e:
-                print('Sulfur is not a number')
+                await ctx.send(embed=discord.Embed(description='Please enter a number'))
+                return
             # If the user entered an amount, check if it is a valid amount
             if num_sulf <= 0:
                 await ctx.send(embed=discord.Embed(description='Please enter a valid number'))
@@ -1112,6 +1163,10 @@ class Items(commands.Cog):
                 item_name_list = file.read().splitlines()
                 file.close()
             item = CamBot.get_string_best_match(item_name_list, item_name)
+
+            if not item:
+                await ctx.send(embed=discord.Embed(description='No recipe found for ' + item_name))
+                return
 
             if item is None:
                 return 'Item not found'
