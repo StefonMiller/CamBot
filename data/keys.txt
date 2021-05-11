@@ -1,0 +1,7 @@
+discord_token
+twitter1
+twitter2
+twitter3
+twitter4
+bitskins1
+bitskins2
